@@ -3,8 +3,8 @@
 **Contributors:** maocular  
 **Tags:** invalid traffic, blocker, ip, adsense, vpn  
 **Requires at least:** 4.5  
-**Tested up to:** 6.7  
-**Stable tag:** 1.2  
+**Tested up to:** 6.8  
+**Stable tag:** 1.3  
 **License:** GPLv2 or later  
 **License URI:** [https://www.gnu.org/licenses/gpl-2.0.html](https://www.gnu.org/licenses/gpl-2.0.html)  
 **Requires PHP:** 7.2  
@@ -50,6 +50,14 @@ Click the "Whitelist My IP" button on the settings page to add your current IP a
 
 ## Changelog
 
+### 1.3
+- Added “Allow Known Crawlers” setting to automatically bypass IP checks for common search engine bots (Googlebot, Bingbot, Slurp, DuckDuckBot, Baiduspider, YandexBot).
+- Introduced “Additional Crawler Patterns” textarea so admins can specify extra User-Agent regexes to whitelist.
+- Updated `invatrbl_check_visitor_ip()` to use `filter_input()` and `sanitize_text_field()` when reading `$_SERVER['HTTP_USER_AGENT']` to comply with WP security standards.
+- Ensured User-Agent checks are fully sanitized to eliminate any `InputNotSanitized` warnings during plugin review.
+- Streamlined front-end blocking logic so known crawlers (built-in or custom) are skipped before performing IPHub API lookups.
+- Minor code refactoring and cleanup to align with WordPress Plugin Coding Standards.
+
 ### 1.2
 
 - Use admin's current IP for API testing instead of a default.
@@ -70,6 +78,10 @@ Click the "Whitelist My IP" button on the settings page to add your current IP a
   - Basic security measures and caching implementation.
 
 ## Upgrade Notice
+
+### 1.3
+
+This update adds an option to allow known search engine crawlers and custom User-Agent patterns to bypass the IP check, and ensures full sanitization of the User-Agent header to meet WordPress security requirements.
 
 ### 1.2
 

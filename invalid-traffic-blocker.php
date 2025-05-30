@@ -5,7 +5,7 @@
  * Plugin URI: https://wordpress.org/plugins/invalid-traffic-blocker
  * Description: Blocks unwanted traffic using the IPHub.info API to protect AdSense publishers from invalid traffic. This is not an official plugin for IPHub.info.
  * Short Description: Protect your site from invalid traffic by blocking suspicious IPs using the IPHub.info API.
- * Version: 1.2
+ * Version: 1.3
  * Author: Michael Akinwumi
  * Author URI: https://michaelakinwumi.com/
  * License: GPLv2 or later
@@ -147,6 +147,23 @@ class INVATRBL_Plugin
             'invalid_traffic_blocker',
             'invatrbl_main_section'
         );
+
+        // Allow Known Crawlers
+        add_settings_field(
+            'allow_crawlers',
+            'Allow Known Crawlers',
+            [$this, 'invatrbl_render_allow_crawlers_field'],
+            'invalid_traffic_blocker',
+            'invatrbl_main_section'
+        );
+
+        add_settings_field(
+            'additional_crawlers',
+            'Additional Crawler Patterns',
+            [$this, 'invatrbl_render_additional_crawlers_field'],
+            'invalid_traffic_blocker',
+            'invatrbl_main_section'
+        );
     }
 
     /**
@@ -207,6 +224,25 @@ class INVATRBL_Plugin
         if ($new_input['cache_duration'] < 1) {
             $new_input['cache_duration'] = 1;
         }
+
+        // Default: allow known crawlers
+        $new_input['allow_crawlers'] = isset($input['allow_crawlers']) ? 1 : 0;
+
+        // Sanitize admin’s extra patterns (one per line)
+        if (! empty($input['additional_crawlers'])) {
+            $lines = explode("\n", $input['additional_crawlers']);
+            $patterns = array();
+            foreach ($lines as $line) {
+                $p = trim(sanitize_text_field($line));
+                if ($p) {
+                    $patterns[] = $p;
+                }
+            }
+            $new_input['additional_crawlers'] = implode("\n", $patterns);
+        } else {
+            $new_input['additional_crawlers'] = '';
+        }
+
 
         return $new_input;
     }
@@ -299,6 +335,39 @@ class INVATRBL_Plugin
         <p class="description">Set the number of hours to cache API responses. Default is 1 hour.</p>
     <?php
     }
+
+    /**
+     * Allow Known Bot field.
+     */
+    public function invatrbl_render_allow_crawlers_field()
+    {
+        $options = get_option($this->option_name);
+        $checked = ! empty($options['allow_crawlers']) ? 1 : 0;
+    ?>
+        <label>
+            <input type="checkbox"
+                name="<?php echo esc_attr($this->option_name); ?>[allow_crawlers]"
+                value="1" <?php checked($checked, 1); ?> />
+            <?php esc_html_e('Skip IP check for known crawler User-Agents', 'invalid-traffic-blocker'); ?>
+        </label>
+    <?php
+    }
+
+    public function invatrbl_render_additional_crawlers_field()
+    {
+        $options = get_option($this->option_name);
+        $value = isset($options['additional_crawlers']) ? $options['additional_crawlers'] : '';
+    ?>
+        <textarea
+            name="<?php echo esc_attr($this->option_name); ?>[additional_crawlers]"
+            rows="3" cols="50"
+            placeholder="<?php esc_attr_e('One regex per line, e.g. ^MyCustomBot', 'invalid-traffic-blocker'); ?>"><?php echo esc_textarea($value); ?></textarea>
+        <p class="description">
+            <?php esc_html_e('Add any extra User-Agent patterns (one per line) to whitelist.', 'invalid-traffic-blocker'); ?>
+        </p>
+    <?php
+    }
+
 
     /**
      * Retrieve the user's IP considering proxy headers.
@@ -410,6 +479,37 @@ class INVATRBL_Plugin
         // Do not run check in the admin area.
         if (is_admin()) {
             return;
+        }
+
+        // 1) Optionally skip known crawlers:
+        $options = get_option($this->option_name);
+        if (! empty($options['allow_crawlers'])) {
+
+            // Default known crawler patterns:
+            $patterns = array(
+                'Googlebot',
+                'bingbot',
+                'Slurp',
+                'DuckDuckBot',
+                'Baiduspider',
+                'YandexBot',
+            );
+
+            // Merge admin’s additional patterns:
+            if (! empty($options['additional_crawlers'])) {
+                $extra = explode("\n", $options['additional_crawlers']);
+                $patterns = array_merge($patterns, $extra);
+            }
+
+            // Sanitize the User-Agent before using in preg_match()
+            $ua_raw = filter_input(INPUT_SERVER, 'HTTP_USER_AGENT', FILTER_UNSAFE_RAW);
+            $ua     = sanitize_text_field($ua_raw ?: '');
+
+            foreach ($patterns as $pat) {
+                if (preg_match('/' . trim($pat) . '/i', $ua)) {
+                    return;  // Allow this crawler
+                }
+            }
         }
 
         $options = get_option($this->option_name);
