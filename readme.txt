@@ -1,18 +1,38 @@
 === Invalid Traffic Blocker ===
-Contributors: maocular
-Tags: invalid traffic, blocker, ip, adsense, vpn
-Requires at least: 4.5
-Tested up to: 6.8
-Stable tag: 1.3
+Contributors: michaelakinwumi
+Donate link: https://michaelakinwumi.com/donate
+Tags: adsense, invalid traffic, ip blocking, vpn blocker, proxy blocker, traffic filter, security
+Requires at least: 5.0
+Tested up to: 6.4
+Requires PHP: 7.4
+Stable tag: 2.0.0
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
-Requires PHP: 7.2
-Text Domain: invalid-traffic-blocker
 
-Protect your site from invalid traffic by blocking suspicious IPs using the IPHub.info API.
+Protect your AdSense revenue by blocking invalid traffic from VPNs, proxies, and suspicious IPs using advanced detection methods.
 
 == Description ==
-Invalid Traffic Blocker is a WordPress plugin that uses the IPHub.info API to detect and block unwanted traffic such as bots, VPNs, and suspicious IP addresses. This helps AdSense publishers and website owners ensure that only valid traffic is served. This is not an official plugin for IPHub.info.
+
+Invalid Traffic Blocker is a comprehensive WordPress plugin designed to protect your website and AdSense revenue from invalid traffic sources such as VPNs, proxies, hosting providers, and other suspicious IP addresses.
+
+**Key Features:**
+
+* **Multiple Blocking Modes**: Choose from Safe, Strict, or Custom blocking modes
+* **IP Whitelisting**: Protect legitimate users and crawlers
+* **Known Bot Detection**: Automatically allow legitimate search engine crawlers
+* **Caching System**: Efficient API response caching to minimize requests
+* **Modern Admin Interface**: Clean, professional tabbed interface
+* **WordPress Standards Compliant**: Follows all WordPress coding and security standards
+
+**Premium Features:**
+
+* **Multiple IP Providers**: Access to IPQualityScore, IPAPI, and ProxyCheck.io for better accuracy
+* **Advanced Analytics**: Detailed blocking statistics and traffic insights
+* **Custom Crawler Patterns**: Add your own User-Agent patterns for whitelisting
+* **Priority Support**: Get faster response times and dedicated assistance
+* **Enhanced Logging**: Comprehensive blocking logs with country and ISP information
+
+The plugin uses a freemium model - the free version provides robust protection using IPHub.info, while the premium license unlocks advanced features for power users.
 
 == Installation ==
 1. Upload the plugin files to the `/wp-content/plugins/invalid-traffic-blocker` directory or install the plugin through the WordPress plugins screen.

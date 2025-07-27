@@ -1,36 +1,312 @@
+/**
+ * Invalid Traffic Blocker Admin JavaScript
+ */
 jQuery(document).ready(function ($) {
-    // Handle API connectivity test.
+
+    // Test API connectivity
     $('#invatrbl-test-api').on('click', function (e) {
         e.preventDefault();
-        var data = {
-            action: 'invatrbl_test_api',
-            _ajax_nonce: invatrblVars.nonce
-        };
-        $.post(invatrblVars.ajaxUrl, data, function (response) {
-            $('#invatrbl-test-result').html(response);
+
+        var $button = $(this);
+        var $result = $('#invatrbl-test-result');
+
+        // Show loading state
+        $button.prop('disabled', true).addClass('loading');
+        $button.html('<span class="dashicons dashicons-update"></span> Testing...');
+
+        $result.removeClass('success error').addClass('loading').show()
+            .html('<p>Testing API connectivity...</p>');
+
+        // AJAX request
+        $.ajax({
+            url: invatrblVars.ajaxUrl,
+            type: 'POST',
+            data: {
+                action: 'invatrbl_test_api',
+                _ajax_nonce: invatrblVars.nonce
+            },
+            success: function (response) {
+                $result.removeClass('loading').addClass('success').html(response);
+            },
+            error: function (xhr, status, error) {
+                $result.removeClass('loading').addClass('error')
+                    .html('<p><strong>Error:</strong> Failed to connect to API. Please check your settings.</p>');
+            },
+            complete: function () {
+                $button.prop('disabled', false).removeClass('loading');
+                $button.html('<span class="dashicons dashicons-networking"></span> Test API Connection');
+            }
         });
     });
 
-    // Handle "Whitelist My IP" button.
-    var adminIP = invatrblVars.adminIP;
+    // Whitelist current IP
     $('#invatrbl-whitelist-my-ip').on('click', function (e) {
         e.preventDefault();
-        var $textarea = $('textarea[name="' + invatrblVars.optionName + '[whitelisted_ips]"]');
-        var currentValue = $textarea.val();
-        var ips = currentValue.split("\n").map(function (ip) {
-            return ip.trim();
-        }).filter(function (ip) {
-            return ip.length > 0;
+
+        var $button = $(this);
+        var $result = $('#invatrbl-test-result');
+        var adminIP = invatrblVars.adminIP;
+
+        if (!adminIP || adminIP === '0.0.0.0') {
+            $result.removeClass('loading success').addClass('error').show()
+                .html('<p><strong>Error:</strong> Could not determine your IP address.</p>');
+            return;
+        }
+
+        // Get current whitelist value
+        var $whitelistField = $('textarea[name="' + invatrblVars.optionName + '[whitelisted_ips]"]');
+        var currentValue = $whitelistField.val().trim();
+
+        // Check if IP is already whitelisted
+        var ipList = currentValue ? currentValue.split('\n') : [];
+        var ipExists = ipList.some(function (ip) {
+            return ip.trim() === adminIP;
         });
-        if (ips.indexOf(adminIP) === -1) {
-            if (currentValue.length > 0) {
-                $textarea.val(currentValue + "\n" + adminIP);
-            } else {
-                $textarea.val(adminIP);
-            }
-            alert("Admin IP (" + adminIP + ") added to whitelist.");
+
+        if (ipExists) {
+            $result.removeClass('loading error').addClass('success').show()
+                .html('<p><strong>Info:</strong> Your IP (' + adminIP + ') is already whitelisted.</p>');
+            return;
+        }
+
+        // Add IP to whitelist
+        ipList.push(adminIP);
+        $whitelistField.val(ipList.join('\n'));
+
+        // Show success message
+        $result.removeClass('loading error').addClass('success').show()
+            .html('<p><strong>Success:</strong> Your IP (' + adminIP + ') has been added to the whitelist. Don\'t forget to save your settings!</p>');
+
+        // Highlight the whitelist field briefly
+        $whitelistField.css('border-color', '#46b450').animate({
+            'border-color': '#ddd'
+        }, 2000);
+    });
+
+    // License key validation
+    var $licenseField = $('input[name="' + invatrblVars.optionName + '[license_key]"]');
+    var licenseTimeout;
+
+    $licenseField.on('input', function () {
+        var $field = $(this);
+        var $status = $('.license-status');
+        var licenseKey = $field.val().trim();
+
+        // Clear previous timeout
+        clearTimeout(licenseTimeout);
+
+        // Remove existing status
+        $status.removeClass('valid invalid').text('');
+
+        if (licenseKey.length < 5) {
+            return;
+        }
+
+        // Debounce validation
+        licenseTimeout = setTimeout(function () {
+            validateLicense(licenseKey, $status);
+        }, 500);
+    });
+
+    function validateLicense(licenseKey, $status) {
+        // Simple client-side validation (server-side validation is still required)
+        if (licenseKey.indexOf('PRO-') === 0 && licenseKey.length > 10) {
+            $status.addClass('valid').text('✓ Valid Format');
         } else {
-            alert("Admin IP (" + adminIP + ") is already in the whitelist.");
+            $status.addClass('invalid').text('✗ Invalid Format');
+        }
+    }
+
+    // Blocking mode radio-like behavior for checkboxes
+    var $blockingModes = $('input[name$="[safe_mode]"], input[name$="[strict_mode]"], input[name$="[custom_mode]"]');
+
+    $blockingModes.on('change', function () {
+        if ($(this).is(':checked')) {
+            // Uncheck other modes
+            $blockingModes.not(this).prop('checked', false);
+
+            // Show/hide custom options
+            toggleCustomOptions();
         }
     });
+
+    function toggleCustomOptions() {
+        var $customMode = $('input[name$="[custom_mode]"]');
+        var $customOptions = $customMode.closest('tr').next('tr');
+
+        if ($customMode.is(':checked')) {
+            $customOptions.show();
+        } else {
+            $customOptions.hide();
+        }
+    }
+
+    // Initialize custom options visibility
+    toggleCustomOptions();
+
+    // Provider field enhancement
+    var $providerField = $('select[name$="[provider]"]');
+
+    $providerField.on('change', function () {
+        var selectedProvider = $(this).val();
+        updateAPIKeyLabel(selectedProvider);
+    });
+
+    function updateAPIKeyLabel(provider) {
+        var $apiKeyLabel = $('label[for*="api_key"]');
+        var providerNames = {
+            'iphub': 'IPHub.info',
+            'ipqualityscore': 'IPQualityScore',
+            'ipapi': 'IPAPI',
+            'proxycheck': 'ProxyCheck.io'
+        };
+
+        if (providerNames[provider]) {
+            $apiKeyLabel.text(providerNames[provider] + ' API Key');
+        }
+    }
+
+    // Initialize API key label
+    updateAPIKeyLabel($providerField.val());
+
+    // Form validation
+    $('form.invatrbl-settings-form').on('submit', function (e) {
+        var $form = $(this);
+        var isValid = true;
+        var errors = [];
+
+        // Validate API key
+        var $apiKey = $('input[name$="[api_key]"]');
+        if ($apiKey.val().trim() === '') {
+            errors.push('API Key is required');
+            $apiKey.css('border-color', '#dc3232');
+            isValid = false;
+        } else {
+            $apiKey.css('border-color', '#ddd');
+        }
+
+        // Validate blocking mode selection
+        var $modes = $('input[name$="[safe_mode]"], input[name$="[strict_mode]"], input[name$="[custom_mode]"]');
+        var modeSelected = $modes.is(':checked');
+
+        if (!modeSelected) {
+            errors.push('Please select a blocking mode');
+            isValid = false;
+        }
+
+        // Show errors if any
+        if (!isValid) {
+            e.preventDefault();
+
+            var errorHtml = '<div class="notice notice-error"><p><strong>Please fix the following errors:</strong></p><ul>';
+            errors.forEach(function (error) {
+                errorHtml += '<li>' + error + '</li>';
+            });
+            errorHtml += '</ul></div>';
+
+            $('.invatrbl-settings-form').prepend(errorHtml);
+
+            // Scroll to top
+            $('html, body').animate({
+                scrollTop: $('.invatrbl-settings-form').offset().top - 50
+            }, 500);
+        }
+    });
+
+    // Remove validation errors on input
+    $('input, select, textarea').on('input change', function () {
+        $(this).css('border-color', '#ddd');
+        $('.notice-error').fadeOut();
+    });
+
+    // Premium feature hints
+    $('.premium-notice').on('click', function () {
+        if (confirm('This is a premium feature. Would you like to learn more about upgrading?')) {
+            window.open('https://yourdomain.com/premium', '_blank');
+        }
+    });
+
+    // Smooth scrolling for internal links
+    $('a[href^="#"]').on('click', function (e) {
+        e.preventDefault();
+
+        var target = $(this.getAttribute('href'));
+        if (target.length) {
+            $('html, body').animate({
+                scrollTop: target.offset().top - 50
+            }, 500);
+        }
+    });
+
+    // Simple toast notification function
+    function showToast(message, type = 'success') {
+        var $toast = $('<div class="invatrbl-toast ' + type + '">' + message + '</div>');
+
+        $toast.css({
+            position: 'fixed',
+            top: '20px',
+            right: '20px',
+            background: type === 'success' ? '#46b450' : '#dc3232',
+            color: '#fff',
+            padding: '12px 20px',
+            borderRadius: '4px',
+            zIndex: 9999,
+            opacity: 0
+        });
+
+        $('body').append($toast);
+
+        $toast.animate({ opacity: 1 }, 300);
+
+        setTimeout(function () {
+            $toast.animate({ opacity: 0 }, 300, function () {
+                $toast.remove();
+            });
+        }, 3000);
+    }
+
+    // Keyboard shortcuts
+    $(document).on('keydown', function (e) {
+        // Ctrl/Cmd + S to save settings
+        if ((e.ctrlKey || e.metaKey) && e.key === 's' && $('.invatrbl-settings-form').length > 0) {
+            e.preventDefault();
+            $('.invatrbl-settings-form').submit();
+        }
+
+        // Escape to close any open modals or notifications
+        if (e.key === 'Escape') {
+            $('.notice-error').fadeOut();
+            $('.invatrbl-toast').remove();
+        }
+    });
+
+    // Print current configuration (for debugging)
+    if (window.console && console.log) {
+        console.log('Invalid Traffic Blocker Admin loaded');
+        console.log('Current IP:', invatrblVars.adminIP);
+    }
 });
+
+// Utility functions available globally
+window.InvatrblAdmin = {
+    showNotice: function (message, type = 'info') {
+        var $notice = $('<div class="notice notice-' + type + ' is-dismissible"><p>' + message + '</p></div>');
+        $('.invatrbl-tab-content').prepend($notice);
+
+        // Auto-dismiss after 5 seconds
+        setTimeout(function () {
+            $notice.fadeOut();
+        }, 5000);
+    },
+
+    getCurrentTab: function () {
+        var urlParams = new URLSearchParams(window.location.search);
+        return urlParams.get('tab') || 'settings';
+    },
+
+    refreshStats: function () {
+        if ($('.invatrbl-analytics-container').length > 0) {
+            location.reload();
+        }
+    }
+};
