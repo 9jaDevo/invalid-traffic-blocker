@@ -150,35 +150,93 @@ jQuery(document).ready(function ($) {
     $providerField.on('change', function () {
         var selectedProvider = $(this).val();
         updateAPIKeyLabel(selectedProvider);
+        updateAPIKeyPlaceholder(selectedProvider);
+        updateAPIKeyDescription(selectedProvider);
+        updateBlockingModes(selectedProvider);
     });
 
     function updateAPIKeyLabel(provider) {
-        var $apiKeyLabel = $('label[for*="api_key"]');
-        var providerNames = {
-            'iphub': 'IPHub.info',
-            'ipqualityscore': 'IPQualityScore',
-            'ipapi': 'IPAPI',
-            'proxycheck': 'ProxyCheck.io'
+        var $apiKeyRow = $('input[name$="[api_key]"]').closest('tr');
+        var $label = $apiKeyRow.find('th label');
+
+        var labels = {
+            'iphub': 'IPHub API Key',
+            'ipqualityscore': 'IPQualityScore API Key',
+            'ipapi': 'IP-API Key (Optional)',
+            'proxycheck': 'ProxyCheck.io API Key'
         };
 
-        if (providerNames[provider]) {
-            $apiKeyLabel.text(providerNames[provider] + ' API Key');
+        if (labels[provider]) {
+            $label.text(labels[provider]);
         }
     }
 
-    // Initialize API key label
+    function updateAPIKeyPlaceholder(provider) {
+        var $apiKeyField = $('input[name$="[api_key]"]');
+
+        var placeholders = {
+            'iphub': 'Enter your IPHub API key',
+            'ipqualityscore': 'Enter your IPQualityScore API key',
+            'ipapi': 'Leave empty for free tier (1000 requests/month)',
+            'proxycheck': 'Enter your ProxyCheck.io API key'
+        };
+
+        if (placeholders[provider]) {
+            $apiKeyField.attr('placeholder', placeholders[provider]);
+        }
+    }
+
+    function updateAPIKeyDescription(provider) {
+        var $apiKeyRow = $('input[name$="[api_key]"]').closest('tr');
+        var $description = $apiKeyRow.find('.description');
+
+        var descriptions = {
+            'iphub': 'Get your API key from <a href="https://iphub.info/register" target="_blank">IPHub.info</a>',
+            'ipqualityscore': 'Get your API key from <a href="https://www.ipqualityscore.com/create-account" target="_blank">IPQualityScore</a>',
+            'ipapi': 'IP-API offers 1000 free requests per month. <a href="http://ip-api.com/docs/api:json" target="_blank">Learn more</a>',
+            'proxycheck': 'Get your API key from <a href="https://proxycheck.io/register" target="_blank">ProxyCheck.io</a>'
+        };
+
+        if (descriptions[provider]) {
+            $description.html(descriptions[provider]);
+        }
+    }
+
+    function updateBlockingModes(provider) {
+        var $blockingRow = $('input[name$="[safe_mode]"]').closest('tr');
+        var $label = $blockingRow.find('th label');
+
+        if (provider === 'iphub') {
+            $label.text('Blocking Options (Select one)');
+        } else {
+            $label.text('Blocking Options');
+        }
+
+        // Trigger a refresh of the blocking modes section if it exists
+        if (typeof window.refreshBlockingModes === 'function') {
+            window.refreshBlockingModes(provider);
+        }
+    }
+
+    // Initialize provider-specific content
     updateAPIKeyLabel($providerField.val());
+    updateAPIKeyPlaceholder($providerField.val());
+    updateAPIKeyDescription($providerField.val());
+    updateBlockingModes($providerField.val());
 
     // Form validation
     $('form.invatrbl-settings-form').on('submit', function (e) {
         var $form = $(this);
         var isValid = true;
         var errors = [];
+        var selectedProvider = $('select[name$="[provider]"]').val();
 
-        // Validate API key
+        // Validate API key (only required for certain providers)
         var $apiKey = $('input[name$="[api_key]"]');
-        if ($apiKey.val().trim() === '') {
-            errors.push('API Key is required');
+        var apiKeyRequired = ['iphub', 'ipqualityscore', 'proxycheck'].includes(selectedProvider);
+
+        if (apiKeyRequired && $apiKey.val().trim() === '') {
+            errors.push('API Key is required for ' + selectedProvider);
             $apiKey.css('border-color', '#dc3232');
             isValid = false;
         } else {

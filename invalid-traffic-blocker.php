@@ -46,6 +46,41 @@ class INVATRBL_Plugin
     }
 
     /**
+     * Get the blocking modes label based on selected provider
+     */
+    private function get_blocking_modes_label()
+    {
+        $options = get_option($this->option_name);
+        $provider = $options['provider'] ?? 'iphub';
+
+        if ($provider === 'iphub') {
+            return esc_html__('Blocking Options (Select one)', 'invalid-traffic-blocker');
+        } else {
+            return esc_html__('Blocking Options', 'invalid-traffic-blocker');
+        }
+    }
+
+    /**
+     * Get the API key label based on selected provider
+     */
+    private function get_api_key_label()
+    {
+        $options = get_option($this->option_name);
+        $provider = $options['provider'] ?? 'iphub';
+
+        switch ($provider) {
+            case 'ipqualityscore':
+                return esc_html__('IPQualityScore API Key', 'invalid-traffic-blocker');
+            case 'ipapi':
+                return esc_html__('IP-API Key (Optional)', 'invalid-traffic-blocker');
+            case 'proxycheck':
+                return esc_html__('ProxyCheck.io API Key', 'invalid-traffic-blocker');
+            default: // iphub
+                return esc_html__('IPHub API Key', 'invalid-traffic-blocker');
+        }
+    }
+
+    /**
      * Check if user has premium license
      */
     private function is_premium_active()
@@ -222,7 +257,7 @@ class INVATRBL_Plugin
         // API Key
         add_settings_field(
             'api_key',
-            esc_html__('IPHub API Key', 'invalid-traffic-blocker'),
+            $this->get_api_key_label(),
             [$this, 'invatrbl_render_api_key_field'],
             'invalid_traffic_blocker',
             'invatrbl_main_section'
@@ -240,7 +275,7 @@ class INVATRBL_Plugin
         // Blocking modes
         add_settings_field(
             'blocking_modes',
-            esc_html__('Blocking Options (Select one)', 'invalid-traffic-blocker'),
+            $this->get_blocking_modes_label(),
             [$this, 'invatrbl_render_blocking_modes_field'],
             'invalid_traffic_blocker',
             'invatrbl_main_section'
@@ -443,12 +478,53 @@ class INVATRBL_Plugin
     public function invatrbl_render_api_key_field()
     {
         $options = get_option($this->option_name);
+        $provider = $options['provider'] ?? 'iphub';
+        $api_key = $options['api_key'] ?? '';
+
+        $placeholder = $this->get_api_key_placeholder($provider);
+        $description = $this->get_api_key_description($provider);
     ?>
         <input type="text"
             name="<?php echo esc_attr($this->option_name); ?>[api_key]"
-            value="<?php echo esc_attr($options['api_key'] ?? ''); ?>"
+            value="<?php echo esc_attr($api_key); ?>"
+            placeholder="<?php echo esc_attr($placeholder); ?>"
             size="40" />
+        <p class="description"><?php echo $description; ?></p>
     <?php
+    }
+
+    /**
+     * Get API key placeholder based on provider
+     */
+    private function get_api_key_placeholder($provider)
+    {
+        switch ($provider) {
+            case 'ipqualityscore':
+                return 'Enter your IPQualityScore API key';
+            case 'ipapi':
+                return 'Leave empty for free tier (1000 requests/month)';
+            case 'proxycheck':
+                return 'Enter your ProxyCheck.io API key';
+            default: // iphub
+                return 'Enter your IPHub API key';
+        }
+    }
+
+    /**
+     * Get API key description based on provider
+     */
+    private function get_api_key_description($provider)
+    {
+        switch ($provider) {
+            case 'ipqualityscore':
+                return 'Get your API key from <a href="https://www.ipqualityscore.com/create-account" target="_blank">IPQualityScore</a>';
+            case 'ipapi':
+                return 'IP-API offers 1000 free requests per month. <a href="http://ip-api.com/docs/api:json" target="_blank">Learn more</a>';
+            case 'proxycheck':
+                return 'Get your API key from <a href="https://proxycheck.io/register" target="_blank">ProxyCheck.io</a>';
+            default: // iphub
+                return 'Get your API key from <a href="https://iphub.info/register" target="_blank">IPHub.info</a>';
+        }
     }
 
     /**
@@ -469,9 +545,24 @@ class INVATRBL_Plugin
     public function invatrbl_render_blocking_modes_field()
     {
         $options = get_option($this->option_name);
+        $provider = $options['provider'] ?? 'iphub';
         $safe   = isset($options['safe_mode']) ? (int)$options['safe_mode'] : 0;
         $strict = isset($options['strict_mode']) ? (int)$options['strict_mode'] : 0;
         $custom = isset($options['custom_mode']) ? (int)$options['custom_mode'] : 0;
+
+        // Show provider-specific blocking options
+        if ($provider === 'iphub') {
+            $this->render_iphub_blocking_modes($safe, $strict, $custom);
+        } else {
+            $this->render_generic_blocking_modes($provider, $safe);
+        }
+    }
+
+    /**
+     * Render IPHub specific blocking modes
+     */
+    private function render_iphub_blocking_modes($safe, $strict, $custom)
+    {
     ?>
         <label>
             <input type="checkbox" name="<?php echo esc_attr($this->option_name); ?>[safe_mode]" value="1" <?php checked($safe, 1); ?> /> Safe Mode (Block only non‑residential IPs: block==1)
@@ -483,6 +574,30 @@ class INVATRBL_Plugin
             <input type="checkbox" name="<?php echo esc_attr($this->option_name); ?>[custom_mode]" value="1" <?php checked($custom, 1); ?> /> Custom Mode (Select specific block types below)
         </label>
         <p><em>Please select only one mode. Safe Mode is recommended.</em></p>
+    <?php
+    }
+
+    /**
+     * Render generic blocking modes for other providers
+     */
+    private function render_generic_blocking_modes($provider, $safe)
+    {
+        $provider_names = [
+            'ipqualityscore' => 'IPQualityScore',
+            'ipapi' => 'IP-API',
+            'proxycheck' => 'ProxyCheck.io'
+        ];
+        $provider_name = $provider_names[$provider] ?? $provider;
+    ?>
+        <label>
+            <input type="checkbox" name="<?php echo esc_attr($this->option_name); ?>[safe_mode]" value="1" <?php checked($safe, 1); ?> />
+            Enable Blocking (Block suspicious IPs detected by <?php echo esc_html($provider_name); ?>)
+        </label>
+        <p><em><?php echo esc_html($provider_name); ?> automatically detects and blocks VPNs, proxies, and suspicious IPs.</em></p>
+
+        <!-- Hide strict and custom modes for other providers -->
+        <input type="hidden" name="<?php echo esc_attr($this->option_name); ?>[strict_mode]" value="0" />
+        <input type="hidden" name="<?php echo esc_attr($this->option_name); ?>[custom_mode]" value="0" />
     <?php
     }
 
@@ -708,11 +823,26 @@ class INVATRBL_Plugin
 
             <div class="invatrbl-card">
                 <h2><span class="dashicons dashicons-external"></span> External Resources</h2>
+                <p class="description">Register for API keys from these providers:</p>
                 <div class="external-links">
                     <a href="https://iphub.info/register" target="_blank" class="button button-secondary">
                         <span class="dashicons dashicons-external"></span>
                         Register for IPHub.info
                     </a>
+                    <?php if ($this->is_premium_active()): ?>
+                        <a href="https://www.ipqualityscore.com/create-account" target="_blank" class="button button-secondary">
+                            <span class="dashicons dashicons-external"></span>
+                            Register for IPQualityScore
+                        </a>
+                        <a href="http://ip-api.com/docs/api:json" target="_blank" class="button button-secondary">
+                            <span class="dashicons dashicons-external"></span>
+                            IP-API Documentation
+                        </a>
+                        <a href="https://proxycheck.io/register" target="_blank" class="button button-secondary">
+                            <span class="dashicons dashicons-external"></span>
+                            Register for ProxyCheck.io
+                        </a>
+                    <?php endif; ?>
                 </div>
             </div>
         </div>
@@ -885,45 +1015,62 @@ class INVATRBL_Plugin
         }
 
         $options = get_option($this->option_name);
-        if (empty($options['api_key'])) {
-            echo '<div style="border: 1px solid red; padding:10px; background-color:#f2dede; color:#a94442;">'
-                . esc_html__('Error: API key is not set.', 'invalid-traffic-blocker')
-                . '</div>';
-            wp_die();
-        }
-
-        $api_key = $options['api_key'];
+        $provider = $options['provider'] ?? 'iphub';
         $test_ip = $this->invatrbl_get_user_ip();
 
-        $response = wp_remote_get("http://v2.api.iphub.info/ip/" . $test_ip, array(
-            'headers' => array('X-Key' => $api_key),
-            'timeout' => 5,
-        ));
-
-        if (is_wp_error($response)) {
-            $error_message = $response->get_error_message();
+        // Check if API key is required for this provider
+        if ($this->is_api_key_required($provider) && empty($options['api_key'])) {
             echo '<div style="border: 1px solid red; padding:10px; background-color:#f2dede; color:#a94442;">'
-                . esc_html__('Error: API Connection Error: ', 'invalid-traffic-blocker')
-                . esc_html($error_message)
+                . esc_html__('Error: API key is required for ', 'invalid-traffic-blocker')
+                . esc_html($this->get_provider_display_name($provider))
                 . '</div>';
             wp_die();
         }
 
-        $code = wp_remote_retrieve_response_code($response);
-        if ($code !== 200) {
+        $api_key = $options['api_key'] ?? '';
+
+        // Use the query_ip_provider method to test the selected provider
+        $result = $this->query_ip_provider($test_ip, $provider, $api_key);
+
+        if ($result === false) {
             echo '<div style="border: 1px solid red; padding:10px; background-color:#f2dede; color:#a94442;">'
-                . esc_html__('Error: API Error: HTTP Code ', 'invalid-traffic-blocker')
-                . esc_html($code)
+                . esc_html__('Error: Failed to connect to ', 'invalid-traffic-blocker')
+                . esc_html($this->get_provider_display_name($provider))
+                . esc_html__(' API. Please check your API key and try again.', 'invalid-traffic-blocker')
                 . '</div>';
             wp_die();
         }
 
-        $body = wp_remote_retrieve_body($response);
         echo '<div style="border: 1px solid green; padding:10px; background-color:#dff0d8; color:#3c763d;">'
-            . esc_html__('Success: API Response: ', 'invalid-traffic-blocker')
-            . esc_html($body)
+            . '<strong>' . esc_html__('Success: Connected to ', 'invalid-traffic-blocker') . esc_html($this->get_provider_display_name($provider)) . '</strong><br>'
+            . esc_html__('Your IP: ', 'invalid-traffic-blocker') . esc_html($test_ip) . '<br>'
+            . esc_html__('Block status: ', 'invalid-traffic-blocker') . esc_html($result['block'] ?? 'Unknown') . '<br>'
+            . esc_html__('Country: ', 'invalid-traffic-blocker') . esc_html($result['country'] ?? 'Unknown') . '<br>'
+            . esc_html__('ISP: ', 'invalid-traffic-blocker') . esc_html($result['isp'] ?? 'Unknown')
             . '</div>';
         wp_die();
+    }
+
+    /**
+     * Check if API key is required for the provider
+     */
+    private function is_api_key_required($provider)
+    {
+        return !in_array($provider, ['ipapi']); // IP-API doesn't require a key for basic usage
+    }
+
+    /**
+     * Get display name for provider
+     */
+    private function get_provider_display_name($provider)
+    {
+        $names = [
+            'iphub' => 'IPHub.info',
+            'ipqualityscore' => 'IPQualityScore',
+            'ipapi' => 'IP-API',
+            'proxycheck' => 'ProxyCheck.io'
+        ];
+        return $names[$provider] ?? $provider;
     }
 
 
