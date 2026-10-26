@@ -14,9 +14,10 @@ jobs:
     - name: Checkout
       uses: actions/checkout@v7
 
-    - name: Exclude hidden files
+    - name: Exclude hidden files and the .github directory
       run: |
         find . -type f -name ".*" -exec rm -f {} \;
+        rm -rf .github
 
     - name: Run plugin check
       uses: wordpress/plugin-check-action@v1

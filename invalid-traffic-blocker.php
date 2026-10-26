@@ -38,7 +38,7 @@ class INVATRBL_Plugin
      * hostname suffixes their operators publish.
      */
     private static $verified_crawlers = array(
-        'Googlebot'   => array('.googlebot.com', '.google.com', '.googleusercontent.com'),
+        'Googlebot'   => array('.googlebot.com', '.google.com'),
         'bingbot'     => array('.search.msn.com'),
         'Slurp'       => array('.crawl.yahoo.net'),
         'Baiduspider' => array('.baidu.com', '.baidu.jp'),
