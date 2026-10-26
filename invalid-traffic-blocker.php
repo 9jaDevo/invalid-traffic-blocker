@@ -5,7 +5,7 @@
  * Plugin URI: https://wordpress.org/plugins/invalid-traffic-blocker
  * Description: Blocks unwanted traffic using the IPHub.info API to protect AdSense publishers from invalid traffic. This is not an official plugin for IPHub.info.
  * Short Description: Protect your site from invalid traffic by blocking suspicious IPs using the IPHub.info API.
- * Version: 1.5.0
+ * Version: 1.5.1
  * Author: Michael Akinwumi
  * Author URI: https://michaelakinwumi.com/
  * License: GPLv2 or later
@@ -443,6 +443,9 @@ class INVATRBL_Plugin
         $forwarded   = isset($_SERVER['HTTP_X_FORWARDED_FOR']) ? sanitize_text_field(wp_unslash($_SERVER['HTTP_X_FORWARDED_FOR'])) : '';
         $cf_ip       = isset($_SERVER['HTTP_CF_CONNECTING_IP']) ? sanitize_text_field(wp_unslash($_SERVER['HTTP_CF_CONNECTING_IP'])) : '';
         $detected_ip = $this->invatrbl_get_user_ip();
+        $header_ip   = $this->invatrbl_get_header_client_ip();
+        // Warn only when the headers name a different visitor IP. Many hosts already put the real IP in REMOTE_ADDR.
+        $headers_ignored = '' !== $header_ip && ('' === $detected_ip || inet_pton($header_ip) !== inet_pton($detected_ip));
     ?>
         <select id="invatrbl-ip_source" name="<?php echo esc_attr($this->option_name); ?>[ip_source]">
             <?php foreach (self::invatrbl_get_ip_sources() as $value => $label) : ?>
@@ -464,7 +467,7 @@ class INVATRBL_Plugin
             );
             ?>
         </p>
-        <?php if (('' !== $forwarded || '' !== $cf_ip) && $detected_ip === $remote_addr) : ?>
+        <?php if ($headers_ignored) : ?>
             <p class="description" style="color:#b32d2e;">
                 <?php esc_html_e('Your request carries proxy headers that the current setting ignores. If your site is behind a CDN or proxy, choose the matching option, or every visitor will be checked using the proxy’s IP.', 'invalid-traffic-blocker'); ?>
             </p>
@@ -558,6 +561,30 @@ class INVATRBL_Plugin
         }
 
         return $remote_addr;
+    }
+
+    /**
+     * The visitor IP that proxy headers on the current request point to: CF-Connecting-IP,
+     * otherwise the first public address in X-Forwarded-For. Returns '' if there is none.
+     * Only used to warn on the settings page; blocking never trusts this value.
+     */
+    private function invatrbl_get_header_client_ip()
+    {
+        $candidates = array();
+        if (! empty($_SERVER['HTTP_CF_CONNECTING_IP'])) {
+            $candidates[] = sanitize_text_field(wp_unslash($_SERVER['HTTP_CF_CONNECTING_IP']));
+        }
+        if (! empty($_SERVER['HTTP_X_FORWARDED_FOR'])) {
+            $candidates = array_merge($candidates, explode(',', sanitize_text_field(wp_unslash($_SERVER['HTTP_X_FORWARDED_FOR']))));
+        }
+
+        foreach ($candidates as $candidate) {
+            $ip = $this->invatrbl_validate_ip(trim($candidate));
+            if ('' !== $ip && $this->invatrbl_is_public_ip($ip)) {
+                return $ip;
+            }
+        }
+        return '';
     }
 
     /**
