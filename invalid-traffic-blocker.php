@@ -5,7 +5,7 @@
  * Plugin URI: https://wordpress.org/plugins/invalid-traffic-blocker
  * Description: Blocks unwanted traffic using the IPHub.info API to protect AdSense publishers from invalid traffic. This is not an official plugin for IPHub.info.
  * Short Description: Protect your site from invalid traffic by blocking suspicious IPs using the IPHub.info API.
- * Version: 1.4
+ * Version: 1.5.0
  * Author: Michael Akinwumi
  * Author URI: https://michaelakinwumi.com/
  * License: GPLv2 or later
@@ -104,7 +104,7 @@ class INVATRBL_Plugin
             'invatrbl-admin-js',
             plugin_dir_url(__FILE__) . 'js/admin.js',
             array('jquery'),
-            '1.2.1',
+            '1.5.0',
             true
         );
         // Pass some variables to our script.
@@ -113,8 +113,17 @@ class INVATRBL_Plugin
             'nonce'     => wp_create_nonce('invatrbl_test_api_nonce'),
             'adminIP'   => $this->invatrbl_get_user_ip(),
             'optionName' => $this->option_name,
+            'testing' => __('Testing saved connection…', 'invalid-traffic-blocker'),
+            'testError' => __('The test could not finish. Check your connection and try again.', 'invalid-traffic-blocker'),
+            'added' => __('Your IP was added. Save changes to apply it.', 'invalid-traffic-blocker'),
+            'exists' => __('Your IP is already in the list.', 'invalid-traffic-blocker'),
+            'missingIP' => __('Your IP could not be detected. Add a trusted IP manually.', 'invalid-traffic-blocker'),
+            'unsaved' => __('You have unsaved changes.', 'invalid-traffic-blocker'),
+            'show' => __('Show key', 'invalid-traffic-blocker'),
+            'hide' => __('Hide key', 'invalid-traffic-blocker'),
         ));
         wp_enqueue_script('invatrbl-admin-js');
+        wp_enqueue_style('invatrbl-admin', plugin_dir_url(__FILE__) . 'css/admin.css', array(), '1.5.0');
     }
 
     /**
@@ -154,7 +163,7 @@ class INVATRBL_Plugin
 
         add_settings_section(
             'invatrbl_main_section',
-            'Main Settings',
+            __('Main Settings', 'invalid-traffic-blocker'),
             null,
             'invalid_traffic_blocker'
         );
@@ -162,7 +171,7 @@ class INVATRBL_Plugin
         // API Key field.
         add_settings_field(
             'api_key',
-            'IPHub API Key',
+            __('IPHub API Key', 'invalid-traffic-blocker'),
             [$this, 'invatrbl_render_api_key_field'],
             'invalid_traffic_blocker',
             'invatrbl_main_section'
@@ -171,7 +180,7 @@ class INVATRBL_Plugin
         // Enable/disable toggle.
         add_settings_field(
             'enabled',
-            'Enable Invalid Traffic Blocker',
+            __('Enable Invalid Traffic Blocker', 'invalid-traffic-blocker'),
             [$this, 'invatrbl_render_enabled_field'],
             'invalid_traffic_blocker',
             'invatrbl_main_section'
@@ -180,7 +189,7 @@ class INVATRBL_Plugin
         // Blocking mode radios.
         add_settings_field(
             'blocking_mode',
-            'Blocking Mode',
+            __('Blocking Mode', 'invalid-traffic-blocker'),
             [$this, 'invatrbl_render_blocking_modes_field'],
             'invalid_traffic_blocker',
             'invatrbl_main_section'
@@ -189,7 +198,7 @@ class INVATRBL_Plugin
         // Custom Mode: Select specific block types.
         add_settings_field(
             'custom_block_options',
-            'Custom Block Options',
+            __('Custom Block Options', 'invalid-traffic-blocker'),
             [$this, 'invatrbl_render_custom_block_options_field'],
             'invalid_traffic_blocker',
             'invatrbl_main_section'
@@ -198,7 +207,7 @@ class INVATRBL_Plugin
         // Whitelisted IP addresses.
         add_settings_field(
             'whitelisted_ips',
-            'Whitelist IP Addresses',
+            __('Whitelist IP Addresses', 'invalid-traffic-blocker'),
             [$this, 'invatrbl_render_whitelist_field'],
             'invalid_traffic_blocker',
             'invatrbl_main_section'
@@ -207,7 +216,7 @@ class INVATRBL_Plugin
         // Where the visitor IP is read from.
         add_settings_field(
             'ip_source',
-            'Visitor IP Source',
+            __('Visitor IP Source', 'invalid-traffic-blocker'),
             [$this, 'invatrbl_render_ip_source_field'],
             'invalid_traffic_blocker',
             'invatrbl_main_section'
@@ -216,7 +225,7 @@ class INVATRBL_Plugin
         // Cache Duration.
         add_settings_field(
             'cache_duration',
-            'Cache Duration (Hours)',
+            __('Cache Duration (Hours)', 'invalid-traffic-blocker'),
             [$this, 'invatrbl_render_cache_duration_field'],
             'invalid_traffic_blocker',
             'invatrbl_main_section'
@@ -225,7 +234,7 @@ class INVATRBL_Plugin
         // Allow Known Crawlers
         add_settings_field(
             'allow_crawlers',
-            'Allow Known Crawlers',
+            __('Allow Known Crawlers', 'invalid-traffic-blocker'),
             [$this, 'invatrbl_render_allow_crawlers_field'],
             'invalid_traffic_blocker',
             'invatrbl_main_section'
@@ -233,7 +242,7 @@ class INVATRBL_Plugin
 
         add_settings_field(
             'additional_crawlers',
-            'Additional Crawler Patterns',
+            __('Additional Crawler Patterns', 'invalid-traffic-blocker'),
             [$this, 'invatrbl_render_additional_crawlers_field'],
             'invalid_traffic_blocker',
             'invatrbl_main_section'
@@ -355,7 +364,8 @@ class INVATRBL_Plugin
     {
         $options = get_option($this->option_name);
 ?>
-        <input type="text" name="<?php echo esc_attr($this->option_name); ?>[api_key]" value="<?php echo isset($options['api_key']) ? esc_attr($options['api_key']) : ''; ?>" size="40" />
+        <input id="invatrbl-api-key" type="password" autocomplete="off" spellcheck="false" name="<?php echo esc_attr($this->option_name); ?>[api_key]" value="<?php echo isset($options['api_key']) ? esc_attr($options['api_key']) : ''; ?>" size="40" />
+        <button type="button" id="invatrbl-show-key" class="button invatrbl-js-only" aria-controls="invatrbl-api-key" aria-pressed="false"><?php esc_html_e('Show key', 'invalid-traffic-blocker'); ?></button>
     <?php
     }
 
@@ -367,7 +377,7 @@ class INVATRBL_Plugin
         $options = get_option($this->option_name);
         $enabled = isset($options['enabled']) ? (int)$options['enabled'] : 0;
     ?>
-        <input type="checkbox" name="<?php echo esc_attr($this->option_name); ?>[enabled]" value="1" <?php checked($enabled, 1); ?> />
+        <label><input type="checkbox" name="<?php echo esc_attr($this->option_name); ?>[enabled]" value="1" <?php checked($enabled, 1); ?> /> <?php esc_html_e('Enable protection for visitors', 'invalid-traffic-blocker'); ?></label>
     <?php
     }
 
@@ -417,7 +427,7 @@ class INVATRBL_Plugin
         $options = get_option($this->option_name);
         $whitelist = isset($options['whitelisted_ips']) ? $options['whitelisted_ips'] : '';
     ?>
-        <textarea name="<?php echo esc_attr($this->option_name); ?>[whitelisted_ips]" rows="5" cols="50"><?php echo esc_textarea($whitelist); ?></textarea>
+        <textarea id="invatrbl-whitelisted_ips" name="<?php echo esc_attr($this->option_name); ?>[whitelisted_ips]" rows="5" cols="50"><?php echo esc_textarea($whitelist); ?></textarea>
         <p class="description">Enter one IP address per line. These IPs will bypass the block checks.</p>
     <?php
     }
@@ -434,7 +444,7 @@ class INVATRBL_Plugin
         $cf_ip       = isset($_SERVER['HTTP_CF_CONNECTING_IP']) ? sanitize_text_field(wp_unslash($_SERVER['HTTP_CF_CONNECTING_IP'])) : '';
         $detected_ip = $this->invatrbl_get_user_ip();
     ?>
-        <select name="<?php echo esc_attr($this->option_name); ?>[ip_source]">
+        <select id="invatrbl-ip_source" name="<?php echo esc_attr($this->option_name); ?>[ip_source]">
             <?php foreach (self::invatrbl_get_ip_sources() as $value => $label) : ?>
                 <option value="<?php echo esc_attr($value); ?>" <?php selected($source, $value); ?>><?php echo esc_html($label); ?></option>
             <?php endforeach; ?>
@@ -470,7 +480,7 @@ class INVATRBL_Plugin
         $options = get_option($this->option_name);
         $cache_duration = isset($options['cache_duration']) ? (int)$options['cache_duration'] : 1;
     ?>
-        <input type="number" name="<?php echo esc_attr($this->option_name); ?>[cache_duration]" value="<?php echo esc_attr($cache_duration); ?>" min="1" />
+        <input id="invatrbl-cache_duration" type="number" name="<?php echo esc_attr($this->option_name); ?>[cache_duration]" value="<?php echo esc_attr($cache_duration); ?>" min="1" />
         <p class="description">Set the number of hours to cache API responses. Default is 1 hour.</p>
     <?php
     }
@@ -610,37 +620,66 @@ class INVATRBL_Plugin
      */
     public function invatrbl_render_settings_page()
     {
-        $admin_ip = $this->invatrbl_get_user_ip();
+        if (! current_user_can('manage_options')) {
+            return;
+        }
+        $options = (array) get_option($this->option_name, array());
+        $configured = ! empty($options['api_key']);
+        $enabled = ! empty($options['enabled']);
+        $active = $configured && $enabled && ! empty($this->invatrbl_get_block_types($options));
+        $status = $active ? __('Protection enabled', 'invalid-traffic-blocker') : __('Protection inactive', 'invalid-traffic-blocker');
+        $groups = array(
+            array('connection', __('Connect IPHub', 'invalid-traffic-blocker'), __('Add your key, save changes, then test your connection.', 'invalid-traffic-blocker'), array('api_key')),
+            array('protection', __('Protection rules', 'invalid-traffic-blocker'), __('Safe Mode is recommended. Strict Mode can block legitimate visitors on shared networks.', 'invalid-traffic-blocker'), array('enabled', 'blocking_mode', 'custom_block_options')),
+            array('exceptions', __('Trusted visitors & crawlers', 'invalid-traffic-blocker'), __('Choose who can bypass IP checks. Only add exceptions you trust.', 'invalid-traffic-blocker'), array('whitelisted_ips', 'allow_crawlers', 'additional_crawlers')),
+            array('network', __('Network & performance', 'invalid-traffic-blocker'), __('Check your visitor IP source and reuse cached results to reduce API requests.', 'invalid-traffic-blocker'), array('ip_source', 'cache_duration')),
+        );
+        global $wp_settings_fields;
+        $fields = isset($wp_settings_fields['invalid_traffic_blocker']['invatrbl_main_section']) ? $wp_settings_fields['invalid_traffic_blocker']['invatrbl_main_section'] : array();
     ?>
-        <div class="wrap">
-            <h1>Invalid Traffic Blocker Settings</h1>
-            <form method="post" action="options.php">
-                <?php
-                settings_fields($this->option_group);
-                do_settings_sections('invalid_traffic_blocker');
-                submit_button();
-                ?>
+        <div class="wrap invatrbl-admin">
+            <header class="invatrbl-header">
+                <div><p class="invatrbl-eyebrow"><?php esc_html_e('Visitor protection', 'invalid-traffic-blocker'); ?></p>
+                <h1><?php esc_html_e('Invalid Traffic Blocker', 'invalid-traffic-blocker'); ?></h1>
+                <p><?php esc_html_e('Clear rules. Trusted visitors. Less unwanted traffic.', 'invalid-traffic-blocker'); ?></p></div>
+                <span class="invatrbl-status <?php echo $active ? 'is-active' : ''; ?>"><?php echo esc_html($status); ?></span>
+            </header>
+            <div class="invatrbl-summary">
+                <strong><?php esc_html_e('Saved configuration', 'invalid-traffic-blocker'); ?></strong>
+                <span><?php echo $configured ? esc_html__('API key saved · Connection not verified on this page', 'invalid-traffic-blocker') : esc_html__('Start by adding your IPHub API key below.', 'invalid-traffic-blocker'); ?></span>
+                <span><?php esc_html_e('If IPHub is unavailable, visitors are allowed through.', 'invalid-traffic-blocker'); ?></span>
+            </div>
+            <nav class="invatrbl-nav" aria-label="<?php esc_attr_e('Settings sections', 'invalid-traffic-blocker'); ?>">
+                <?php foreach ($groups as $group) : ?><a href="#invatrbl-<?php echo esc_attr($group[0]); ?>"><?php echo esc_html($group[1]); ?></a><?php endforeach; ?>
+            </nav>
+            <form id="invatrbl-settings-form" method="post" action="options.php">
+                <?php settings_fields($this->option_group); ?>
+                <?php foreach ($groups as $group) : ?>
+                    <section class="invatrbl-card" id="invatrbl-<?php echo esc_attr($group[0]); ?>" aria-labelledby="invatrbl-title-<?php echo esc_attr($group[0]); ?>">
+                        <h2 id="invatrbl-title-<?php echo esc_attr($group[0]); ?>"><?php echo esc_html($group[1]); ?></h2>
+                        <p class="invatrbl-intro"><?php echo esc_html($group[2]); ?></p>
+                        <?php foreach ($group[3] as $field_id) : if (! isset($fields[$field_id])) { continue; } $field = $fields[$field_id]; ?>
+                            <div class="invatrbl-field" id="invatrbl-field-<?php echo esc_attr($field_id); ?>">
+                                <fieldset><legend><?php if (in_array($field_id, array('api_key', 'whitelisted_ips', 'additional_crawlers', 'ip_source', 'cache_duration'), true)) : ?><label for="invatrbl-<?php echo esc_attr('api_key' === $field_id ? 'api-key' : $field_id); ?>"><?php echo esc_html($field['title']); ?></label><?php else : ?><?php echo esc_html($field['title']); ?><?php endif; ?></legend>
+                                <?php call_user_func($field['callback'], $field['args']); ?></fieldset>
+                            </div>
+                        <?php endforeach; ?>
+                        <?php if ('connection' === $group[0]) : ?>
+                            <p class="description"><?php esc_html_e('Enabling protection sends visitor IP addresses and your API key to IPHub for uncached lookups. Testing sends your current IP using the saved key. Save a changed key before testing.', 'invalid-traffic-blocker'); ?></p>
+                            <p><a href="https://iphub.info/register" target="_blank" rel="noopener noreferrer"><?php esc_html_e('Get an IPHub API key', 'invalid-traffic-blocker'); ?></a> · <a href="https://iphub.info/legal/privacy" target="_blank" rel="noopener noreferrer"><?php esc_html_e('IPHub privacy policy', 'invalid-traffic-blocker'); ?></a> · <a href="https://iphub.info/legal/tos" target="_blank" rel="noopener noreferrer"><?php esc_html_e('Terms of service', 'invalid-traffic-blocker'); ?></a></p>
+                            <button type="button" id="invatrbl-test-api" class="button invatrbl-js-only"><?php esc_html_e('Test saved connection', 'invalid-traffic-blocker'); ?></button>
+                            <div id="invatrbl-test-result" role="status" aria-live="polite" aria-atomic="true"></div>
+                        <?php elseif ('exceptions' === $group[0]) : ?>
+                            <button type="button" id="invatrbl-whitelist-my-ip" class="button invatrbl-js-only"><?php esc_html_e('Add my current IP to trusted visitors', 'invalid-traffic-blocker'); ?></button>
+                            <p id="invatrbl-whitelist-result" role="status" aria-live="polite"></p>
+                        <?php endif; ?>
+                    </section>
+                <?php endforeach; ?>
+                <div class="invatrbl-save"><?php submit_button(__('Save changes', 'invalid-traffic-blocker'), 'primary', 'submit', false); ?>
+                    <span id="invatrbl-save-status" role="status" aria-live="polite"><?php esc_html_e('Changes apply after saving.', 'invalid-traffic-blocker'); ?></span>
+                </div>
             </form>
-            <p>
-                <a href="https://iphub.info/register" target="_blank" class="button button-secondary">Register for IPHub.info</a>
-            </p>
-            <!-- Buttons will be handled by admin.js -->
-            <p>
-                <button id="invatrbl-test-api" class="button">Test API Connectivity (Using Your IP)</button>
-                <button id="invatrbl-whitelist-my-ip" class="button">Whitelist My IP</button>
-            </p>
-            <div id="invatrbl-test-result" style="margin-top:10px;"></div>
-            <p class="description">
-                <?php
-                printf(
-                    /* translators: %s: link to IVTB, the enterprise version of the plugin. */
-                    esc_html__('Need the same kind of protection on a site that isn\'t built on WordPress? %s', 'invalid-traffic-blocker'),
-                    '<a href="' . esc_url(self::ENTERPRISE_URL) . '" target="_blank" rel="noopener noreferrer">'
-                        . esc_html__('See IVTB, the enterprise version of Invalid Traffic Blocker.', 'invalid-traffic-blocker')
-                        . '</a>'
-                );
-                ?>
-            </p>
+            <p class="description invatrbl-footer"><?php esc_html_e('Protecting a non-WordPress site?', 'invalid-traffic-blocker'); ?> <a href="<?php echo esc_url(self::ENTERPRISE_URL); ?>" target="_blank" rel="noopener noreferrer"><?php esc_html_e('Explore IVTB', 'invalid-traffic-blocker'); ?></a></p>
         </div>
 <?php
     }

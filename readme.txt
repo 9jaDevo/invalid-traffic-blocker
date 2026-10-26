@@ -3,7 +3,7 @@ Contributors: maocular
 Tags: invalid traffic, blocker, ip, adsense, vpn
 Requires at least: 4.5
 Tested up to: 7.1
-Stable tag: 1.4
+Stable tag: 1.5.0
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 Requires PHP: 7.2
@@ -46,6 +46,10 @@ Leave it on "Automatic" if you use Cloudflare, or a proxy on your own server or 
 No. With "Allow Known Crawlers" enabled, Googlebot, Bingbot, Yahoo Slurp, Baiduspider and YandexBot are confirmed with a reverse DNS lookup. A visitor who only fakes the User-Agent is checked like everyone else. Patterns you add under "Additional Crawler Patterns" are not verified, so only add crawlers you need.
 
 == Changelog ==
+= 1.5.0 =
+* Refreshed the settings page with responsive sections, saved configuration status, a masked API key, inline whitelist feedback, and API test loading/error states. Assets are local and load only on the plugin settings page.
+* Added clear IPHub data-sharing guidance beside setup. Existing option names and visitor blocking behavior are preserved.
+
 = 1.4 =
 * Security: The visitor IP is now read from the direct connection. Proxy headers (X-Forwarded-For, CF-Connecting-IP) are only trusted when the request comes from Cloudflare or a private network address, or when you choose them in the new "Visitor IP Source" setting. Previously any visitor could fake their IP to skip the check or use up your API quota.
 * Security: "Allow Known Crawlers" now confirms crawlers with a reverse DNS lookup, so a faked crawler User-Agent no longer skips the check. DuckDuckBot was removed from the built-in list because it can't be verified this way; add it under "Additional Crawler Patterns" if you need it.
@@ -86,6 +90,9 @@ No. With "Allow Known Crawlers" enabled, Googlebot, Bingbot, Yahoo Slurp, Baidus
 
 
 == Upgrade Notice ==
+= 1.5.0 =
+Security update and redesigned settings page. Stops visitors faking their IP or a crawler User-Agent to get past the blocker, and switches API calls to HTTPS. If your site is behind a proxy or CDN other than Cloudflare, check the Visitor IP Source setting after updating.
+
 = 1.4 =
 Security update: stops visitors faking their IP or a crawler User-Agent to get past the blocker, and switches API calls to HTTPS. If your site is behind a proxy or CDN other than Cloudflare, check the new Visitor IP Source setting after updating.
 
@@ -96,9 +103,11 @@ This update adds an option to allow known search engine crawlers and custom User
 This update includes improved API testing with admin IP detection, styled response messages, and an automatic whitelist option.
 
 == Screenshots ==
-1. Admin settings page with API key, blocking mode options, and whitelist functionality.
-2. API connectivity test output showing a green info box on success.
-3. Warning message for blocked users.
+1. Connect IPHub: add your API key (hidden by default), see whether protection is active, and test the saved connection.
+2. Protection rules: turn protection on and choose Safe, Strict or Custom blocking mode.
+3. Trusted visitors and crawlers: whitelist IP addresses, let verified search engine crawlers through, and add your own crawler patterns.
+4. Network and performance: choose where the visitor IP is read from, see the IP the plugin detects, and set how long results are cached.
+5. The page a visitor sees when their IP address is blocked.
 
 == External Services ==
 This plugin connects to the IPHub.info API (https://v2.api.iphub.info) to validate IP addresses and determine whether they are suspicious, likely belonging to bots, VPNs, or invalid traffic. All requests use HTTPS.

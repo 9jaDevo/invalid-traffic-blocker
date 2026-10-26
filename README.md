@@ -135,3 +135,8 @@ Terms and Privacy:
   • IPHub.info Privacy Policy: [https://iphub.info/legal/privacy](https://iphub.info/legal/privacy)
 
 When "Allow Known Crawlers" is enabled, a visitor whose User-Agent claims to be a known search engine crawler is verified with a reverse and forward DNS lookup through your server's own DNS resolver. Nothing is sent to IPHub.info or any other service for this check.
+
+## Admin experience update (1.5.0)
+
+* Refreshed the settings page with responsive sections, saved configuration status, a masked API key, inline whitelist feedback, and API test loading/error states. Assets are local and load only on the plugin settings page.
+* Added clear IPHub data-sharing guidance beside setup. Existing option names and visitor blocking behavior are preserved.
