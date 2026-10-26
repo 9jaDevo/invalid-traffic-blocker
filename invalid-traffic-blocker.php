@@ -5,7 +5,7 @@
  * Plugin URI: https://wordpress.org/plugins/invalid-traffic-blocker
  * Description: Blocks unwanted traffic using the IPHub.info API to protect AdSense publishers from invalid traffic. This is not an official plugin for IPHub.info.
  * Short Description: Protect your site from invalid traffic by blocking suspicious IPs using the IPHub.info API.
- * Version: 1.3
+ * Version: 1.4
  * Author: Michael Akinwumi
  * Author URI: https://michaelakinwumi.com/
  * License: GPLv2 or later
@@ -22,8 +22,57 @@ if (! defined('ABSPATH')) {
 class INVATRBL_Plugin
 {
 
+    const API_URL = 'https://v2.api.iphub.info/ip/';
+
+    // IVTB, the enterprise version for sites not built on WordPress.
+    const ENTERPRISE_URL = 'https://ivtb.uk/';
+
+    // After an API failure, skip lookups for this long so visitors don't wait on a failing API.
+    const API_BACKOFF_SECONDS = 300;
+
     private $option_group = 'invatrbl_options';
     private $option_name  = 'invatrbl_options';
+
+    /**
+     * Crawlers that can be confirmed with a reverse DNS lookup, mapped to the
+     * hostname suffixes their operators publish.
+     */
+    private static $verified_crawlers = array(
+        'Googlebot'   => array('.googlebot.com', '.google.com', '.googleusercontent.com'),
+        'bingbot'     => array('.search.msn.com'),
+        'Slurp'       => array('.crawl.yahoo.net'),
+        'Baiduspider' => array('.baidu.com', '.baidu.jp'),
+        'YandexBot'   => array('.yandex.ru', '.yandex.net', '.yandex.com'),
+    );
+
+    /**
+     * Cloudflare edge ranges (https://www.cloudflare.com/ips/). In automatic mode,
+     * CF-Connecting-IP is trusted only when the connection comes from one of these.
+     */
+    private static $cloudflare_ranges = array(
+        '173.245.48.0/20',
+        '103.21.244.0/22',
+        '103.22.200.0/22',
+        '103.31.4.0/22',
+        '141.101.64.0/18',
+        '108.162.192.0/18',
+        '190.93.240.0/20',
+        '188.114.96.0/20',
+        '197.234.240.0/22',
+        '198.41.128.0/17',
+        '162.158.0.0/15',
+        '104.16.0.0/13',
+        '104.24.0.0/14',
+        '172.64.0.0/13',
+        '131.0.72.0/22',
+        '2400:cb00::/32',
+        '2606:4700::/32',
+        '2803:f800::/32',
+        '2405:b500::/32',
+        '2405:8100::/32',
+        '2a06:98c0::/29',
+        '2c0f:f248::/32',
+    );
 
     public function __construct()
     {
@@ -31,6 +80,9 @@ class INVATRBL_Plugin
         add_action('admin_menu', [$this, 'invatrbl_add_settings_page']);
         add_action('admin_init', [$this, 'invatrbl_register_settings']);
         add_action('admin_enqueue_scripts', [$this, 'invatrbl_admin_enqueue_scripts']);
+
+        // Plugins screen: link to the enterprise version next to "View details".
+        add_filter('plugin_row_meta', [$this, 'invatrbl_plugin_row_meta'], 10, 2);
 
         // AJAX callback for testing API connectivity.
         add_action('wp_ajax_invatrbl_test_api', [$this, 'invatrbl_test_api_connectivity']);
@@ -63,6 +115,19 @@ class INVATRBL_Plugin
             'optionName' => $this->option_name,
         ));
         wp_enqueue_script('invatrbl-admin-js');
+    }
+
+    /**
+     * Add a link to IVTB (the enterprise version for non-WordPress sites) on the Plugins screen.
+     */
+    public function invatrbl_plugin_row_meta($links, $file)
+    {
+        if (plugin_basename(__FILE__) === $file) {
+            $links[] = '<a href="' . esc_url(self::ENTERPRISE_URL) . '" target="_blank" rel="noopener noreferrer">'
+                . esc_html__('Enterprise version for non-WordPress sites', 'invalid-traffic-blocker')
+                . '</a>';
+        }
+        return $links;
     }
 
     /**
@@ -112,10 +177,10 @@ class INVATRBL_Plugin
             'invatrbl_main_section'
         );
 
-        // Blocking mode checkboxes.
+        // Blocking mode radios.
         add_settings_field(
-            'blocking_modes',
-            'Blocking Options (Select one)',
+            'blocking_mode',
+            'Blocking Mode',
             [$this, 'invatrbl_render_blocking_modes_field'],
             'invalid_traffic_blocker',
             'invatrbl_main_section'
@@ -135,6 +200,15 @@ class INVATRBL_Plugin
             'whitelisted_ips',
             'Whitelist IP Addresses',
             [$this, 'invatrbl_render_whitelist_field'],
+            'invalid_traffic_blocker',
+            'invatrbl_main_section'
+        );
+
+        // Where the visitor IP is read from.
+        add_settings_field(
+            'ip_source',
+            'Visitor IP Source',
+            [$this, 'invatrbl_render_ip_source_field'],
             'invalid_traffic_blocker',
             'invatrbl_main_section'
         );
@@ -168,41 +242,32 @@ class INVATRBL_Plugin
 
     /**
      * Sanitize and validate settings input.
+     *
+     * WordPress can run this twice on one save (update_option() then add_option()
+     * on the first save), so running it on its own output must not change anything.
      */
     public static function invatrbl_sanitize_settings($input)
     {
+        $input     = is_array($input) ? $input : array();
         $new_input = array();
 
         $new_input['api_key'] = isset($input['api_key']) ? sanitize_text_field($input['api_key']) : '';
-        $new_input['enabled'] = isset($input['enabled']) ? absint($input['enabled']) : 0;
+        $new_input['enabled'] = ! empty($input['enabled']) ? 1 : 0;
 
-        // Blocking modes.
-        $new_input['safe_mode']   = isset($input['safe_mode']) ? 1 : 0;
-        $new_input['strict_mode'] = isset($input['strict_mode']) ? 1 : 0;
-        $new_input['custom_mode'] = isset($input['custom_mode']) ? 1 : 0;
+        // Blocking mode: safe, strict or custom.
+        $new_input['blocking_mode'] = self::invatrbl_get_blocking_mode($input);
 
-        // For custom mode, store allowed block types.
-        if (! empty($new_input['custom_mode'])) {
-            $custom = array();
-            if (isset($input['custom_block_options']) && is_array($input['custom_block_options'])) {
-                foreach ($input['custom_block_options'] as $block_option) {
-                    $custom[] = absint($block_option);
+        // For custom mode, store the selected block types (1 and/or 2).
+        $custom = array();
+        if ('custom' === $new_input['blocking_mode'] && isset($input['custom_block_options']) && is_array($input['custom_block_options'])) {
+            foreach ($input['custom_block_options'] as $block_option) {
+                $block_option = absint($block_option);
+                if (in_array($block_option, array(1, 2), true) && ! in_array($block_option, $custom, true)) {
+                    $custom[] = $block_option;
                 }
             }
-            $new_input['custom_block_options'] = $custom;
-        } else {
-            $new_input['custom_block_options'] = array();
         }
-
-        // Ensure only one blocking mode is active.
-        $modes_active = (int)$new_input['safe_mode'] + (int)$new_input['strict_mode'] + (int)$new_input['custom_mode'];
-        if ($modes_active > 1) {
-            add_settings_error('invatrbl_options', 'mode_error', 'Please select only one blocking mode option.', 'error');
-            $new_input['safe_mode']   = 1;
-            $new_input['strict_mode'] = 0;
-            $new_input['custom_mode'] = 0;
-            $new_input['custom_block_options'] = array();
-        }
+        $new_input['custom_block_options'] = $custom;
 
         // Sanitize the whitelist.
         if (isset($input['whitelisted_ips'])) {
@@ -219,14 +284,17 @@ class INVATRBL_Plugin
             $new_input['whitelisted_ips'] = '';
         }
 
+        // Visitor IP source (default automatic).
+        $ip_source = isset($input['ip_source']) ? sanitize_key($input['ip_source']) : 'auto';
+        $new_input['ip_source'] = array_key_exists($ip_source, self::invatrbl_get_ip_sources()) ? $ip_source : 'auto';
+
         // Cache duration (default 1 hour).
         $new_input['cache_duration'] = isset($input['cache_duration']) ? absint($input['cache_duration']) : 1;
         if ($new_input['cache_duration'] < 1) {
             $new_input['cache_duration'] = 1;
         }
 
-        // Default: allow known crawlers
-        $new_input['allow_crawlers'] = isset($input['allow_crawlers']) ? 1 : 0;
+        $new_input['allow_crawlers'] = ! empty($input['allow_crawlers']) ? 1 : 0;
 
         // Sanitize admin’s extra patterns (one per line)
         if (! empty($input['additional_crawlers'])) {
@@ -245,6 +313,39 @@ class INVATRBL_Plugin
 
 
         return $new_input;
+    }
+
+    /**
+     * Get the blocking mode, falling back to the separate checkboxes used before 1.4.
+     */
+    private static function invatrbl_get_blocking_mode($options)
+    {
+        if (isset($options['blocking_mode']) && in_array($options['blocking_mode'], array('safe', 'strict', 'custom'), true)) {
+            return $options['blocking_mode'];
+        }
+        if (! empty($options['safe_mode'])) {
+            return 'safe';
+        }
+        if (! empty($options['strict_mode'])) {
+            return 'strict';
+        }
+        if (! empty($options['custom_mode'])) {
+            return 'custom';
+        }
+        return 'safe';
+    }
+
+    /**
+     * Available visitor IP sources and their labels.
+     */
+    private static function invatrbl_get_ip_sources()
+    {
+        return array(
+            'auto'            => __('Automatic (recommended)', 'invalid-traffic-blocker'),
+            'remote_addr'     => __('Direct connection only (REMOTE_ADDR)', 'invalid-traffic-blocker'),
+            'cloudflare'      => __('Cloudflare (CF-Connecting-IP header)', 'invalid-traffic-blocker'),
+            'x_forwarded_for' => __('Reverse proxy or load balancer (X-Forwarded-For header)', 'invalid-traffic-blocker'),
+        );
     }
 
     /**
@@ -276,20 +377,18 @@ class INVATRBL_Plugin
     public function invatrbl_render_blocking_modes_field()
     {
         $options = get_option($this->option_name);
-        $safe   = isset($options['safe_mode']) ? (int)$options['safe_mode'] : 0;
-        $strict = isset($options['strict_mode']) ? (int)$options['strict_mode'] : 0;
-        $custom = isset($options['custom_mode']) ? (int)$options['custom_mode'] : 0;
+        $mode    = self::invatrbl_get_blocking_mode($options);
     ?>
         <label>
-            <input type="checkbox" name="<?php echo esc_attr($this->option_name); ?>[safe_mode]" value="1" <?php checked($safe, 1); ?> /> Safe Mode (Block only non‑residential IPs: block==1)
+            <input type="radio" name="<?php echo esc_attr($this->option_name); ?>[blocking_mode]" value="safe" <?php checked($mode, 'safe'); ?> /> Safe Mode (Block only non‑residential IPs: block==1)
         </label><br />
         <label>
-            <input type="checkbox" name="<?php echo esc_attr($this->option_name); ?>[strict_mode]" value="1" <?php checked($strict, 1); ?> /> Strict Mode (Block both non‑residential and residential IPs: block==1 or block==2)
+            <input type="radio" name="<?php echo esc_attr($this->option_name); ?>[blocking_mode]" value="strict" <?php checked($mode, 'strict'); ?> /> Strict Mode (Block both non‑residential and residential IPs: block==1 or block==2)
         </label><br />
         <label>
-            <input type="checkbox" name="<?php echo esc_attr($this->option_name); ?>[custom_mode]" value="1" <?php checked($custom, 1); ?> /> Custom Mode (Select specific block types below)
+            <input type="radio" name="<?php echo esc_attr($this->option_name); ?>[blocking_mode]" value="custom" <?php checked($mode, 'custom'); ?> /> Custom Mode (Select specific block types below)
         </label>
-        <p><em>Please select only one mode. Safe Mode is recommended.</em></p>
+        <p><em>Safe Mode is recommended.</em></p>
     <?php
     }
 
@@ -324,6 +423,46 @@ class INVATRBL_Plugin
     }
 
     /**
+     * Render visitor IP source field, with what the plugin sees for the current request.
+     */
+    public function invatrbl_render_ip_source_field()
+    {
+        $options     = get_option($this->option_name);
+        $source      = isset($options['ip_source']) ? $options['ip_source'] : 'auto';
+        $remote_addr = isset($_SERVER['REMOTE_ADDR']) ? sanitize_text_field(wp_unslash($_SERVER['REMOTE_ADDR'])) : '';
+        $forwarded   = isset($_SERVER['HTTP_X_FORWARDED_FOR']) ? sanitize_text_field(wp_unslash($_SERVER['HTTP_X_FORWARDED_FOR'])) : '';
+        $cf_ip       = isset($_SERVER['HTTP_CF_CONNECTING_IP']) ? sanitize_text_field(wp_unslash($_SERVER['HTTP_CF_CONNECTING_IP'])) : '';
+        $detected_ip = $this->invatrbl_get_user_ip();
+    ?>
+        <select name="<?php echo esc_attr($this->option_name); ?>[ip_source]">
+            <?php foreach (self::invatrbl_get_ip_sources() as $value => $label) : ?>
+                <option value="<?php echo esc_attr($value); ?>" <?php selected($source, $value); ?>><?php echo esc_html($label); ?></option>
+            <?php endforeach; ?>
+        </select>
+        <p class="description">
+            <?php esc_html_e('Automatic uses the direct connection address, and only trusts proxy headers when the request comes from Cloudflare or from a private network address. Choose a header option only if every request to your site passes through that proxy, otherwise visitors can fake their IP.', 'invalid-traffic-blocker'); ?>
+        </p>
+        <p class="description">
+            <?php
+            printf(
+                /* translators: 1: IP the plugin uses, 2: REMOTE_ADDR value, 3: X-Forwarded-For value, 4: CF-Connecting-IP value. */
+                esc_html__('Your current request: the plugin sees your IP as %1$s (REMOTE_ADDR: %2$s, X-Forwarded-For: %3$s, CF-Connecting-IP: %4$s).', 'invalid-traffic-blocker'),
+                '<code>' . esc_html('' !== $detected_ip ? $detected_ip : '-') . '</code>',
+                '<code>' . esc_html('' !== $remote_addr ? $remote_addr : '-') . '</code>',
+                '<code>' . esc_html('' !== $forwarded ? $forwarded : '-') . '</code>',
+                '<code>' . esc_html('' !== $cf_ip ? $cf_ip : '-') . '</code>'
+            );
+            ?>
+        </p>
+        <?php if (('' !== $forwarded || '' !== $cf_ip) && $detected_ip === $remote_addr) : ?>
+            <p class="description" style="color:#b32d2e;">
+                <?php esc_html_e('Your request carries proxy headers that the current setting ignores. If your site is behind a CDN or proxy, choose the matching option, or every visitor will be checked using the proxy’s IP.', 'invalid-traffic-blocker'); ?>
+            </p>
+        <?php endif; ?>
+    <?php
+    }
+
+    /**
      * Render cache duration field.
      */
     public function invatrbl_render_cache_duration_field()
@@ -348,8 +487,11 @@ class INVATRBL_Plugin
             <input type="checkbox"
                 name="<?php echo esc_attr($this->option_name); ?>[allow_crawlers]"
                 value="1" <?php checked($checked, 1); ?> />
-            <?php esc_html_e('Skip IP check for known crawler User-Agents', 'invalid-traffic-blocker'); ?>
+            <?php esc_html_e('Skip the IP check for verified search engine crawlers (Googlebot, Bingbot, Yahoo Slurp, Baiduspider, YandexBot)', 'invalid-traffic-blocker'); ?>
         </label>
+        <p class="description">
+            <?php esc_html_e('Each crawler is confirmed with a reverse DNS lookup, so a visitor who only fakes a crawler User-Agent is still checked.', 'invalid-traffic-blocker'); ?>
+        </p>
     <?php
     }
 
@@ -361,29 +503,106 @@ class INVATRBL_Plugin
         <textarea
             name="<?php echo esc_attr($this->option_name); ?>[additional_crawlers]"
             rows="3" cols="50"
-            placeholder="<?php esc_attr_e('One regex per line, e.g. ^MyCustomBot', 'invalid-traffic-blocker'); ?>"><?php echo esc_textarea($value); ?></textarea>
+            placeholder="<?php esc_attr_e('One User-Agent fragment per line, e.g. MyCustomBot', 'invalid-traffic-blocker'); ?>"><?php echo esc_textarea($value); ?></textarea>
         <p class="description">
-            <?php esc_html_e('Add any extra User-Agent patterns (one per line) to whitelist.', 'invalid-traffic-blocker'); ?>
+            <?php esc_html_e('Visitors whose User-Agent contains any of these (plain text, not case-sensitive) skip the IP check. These are not verified and can be faked, so only add crawlers you need.', 'invalid-traffic-blocker'); ?>
         </p>
     <?php
     }
 
 
     /**
-     * Retrieve the user's IP considering proxy headers.
+     * Retrieve the visitor's IP address.
+     *
+     * Proxy headers can be sent by anyone, so they are only trusted when the admin
+     * chose that source, or in automatic mode when the connection itself comes from
+     * Cloudflare or a private network address. Returns '' if no valid IP is found.
      */
     private function invatrbl_get_user_ip()
     {
-        if (! empty($_SERVER['HTTP_X_FORWARDED_FOR'])) {
-            $x_forwarded = sanitize_text_field(wp_unslash($_SERVER['HTTP_X_FORWARDED_FOR']));
-            $ips = explode(',', $x_forwarded);
-            return sanitize_text_field(trim($ips[0]));
-        } elseif (! empty($_SERVER['HTTP_CLIENT_IP'])) {
-            return sanitize_text_field(wp_unslash($_SERVER['HTTP_CLIENT_IP']));
-        } elseif (! empty($_SERVER['REMOTE_ADDR'])) {
-            return sanitize_text_field(wp_unslash($_SERVER['REMOTE_ADDR']));
+        $options     = get_option($this->option_name);
+        $source      = isset($options['ip_source']) ? $options['ip_source'] : 'auto';
+        $remote_addr = isset($_SERVER['REMOTE_ADDR']) ? $this->invatrbl_validate_ip(sanitize_text_field(wp_unslash($_SERVER['REMOTE_ADDR']))) : '';
+
+        $use_cloudflare = 'cloudflare' === $source
+            || ('auto' === $source && '' !== $remote_addr && $this->invatrbl_is_cloudflare_ip($remote_addr));
+        $use_forwarded  = 'x_forwarded_for' === $source
+            || ('auto' === $source && '' !== $remote_addr && ! $this->invatrbl_is_public_ip($remote_addr));
+
+        if ($use_cloudflare && ! empty($_SERVER['HTTP_CF_CONNECTING_IP'])) {
+            $ip = $this->invatrbl_validate_ip(sanitize_text_field(wp_unslash($_SERVER['HTTP_CF_CONNECTING_IP'])));
+            if ('' !== $ip) {
+                return $ip;
+            }
         }
-        return '0.0.0.0';
+
+        if ($use_forwarded && ! empty($_SERVER['HTTP_X_FORWARDED_FOR'])) {
+            // Read from the right: proxies append to this header, and entries further left were sent by the client.
+            $forwarded = array_reverse(explode(',', sanitize_text_field(wp_unslash($_SERVER['HTTP_X_FORWARDED_FOR']))));
+            foreach ($forwarded as $candidate) {
+                $ip = $this->invatrbl_validate_ip(trim($candidate));
+                if ('' !== $ip && $this->invatrbl_is_public_ip($ip) && ! $this->invatrbl_is_cloudflare_ip($ip)) {
+                    return $ip;
+                }
+            }
+        }
+
+        return $remote_addr;
+    }
+
+    /**
+     * Return the IP if it is a valid IPv4/IPv6 address, otherwise ''.
+     */
+    private function invatrbl_validate_ip($ip)
+    {
+        $valid = filter_var($ip, FILTER_VALIDATE_IP);
+        return false === $valid ? '' : $valid;
+    }
+
+    /**
+     * Whether the IP is outside private and reserved ranges.
+     */
+    private function invatrbl_is_public_ip($ip)
+    {
+        return false !== filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE);
+    }
+
+    /**
+     * Whether the IP belongs to a Cloudflare edge range.
+     */
+    private function invatrbl_is_cloudflare_ip($ip)
+    {
+        foreach (self::$cloudflare_ranges as $range) {
+            if ($this->invatrbl_ip_in_range($ip, $range)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Whether a valid IP falls inside a CIDR range (IPv4 or IPv6).
+     */
+    private function invatrbl_ip_in_range($ip, $cidr)
+    {
+        list($subnet, $bits) = explode('/', $cidr);
+        $ip_bin     = inet_pton($ip);
+        $subnet_bin = inet_pton($subnet);
+        if (false === $ip_bin || false === $subnet_bin || strlen($ip_bin) !== strlen($subnet_bin)) {
+            return false;
+        }
+
+        $bits      = (int) $bits;
+        $full      = intdiv($bits, 8);
+        $remainder = $bits % 8;
+        if (substr($ip_bin, 0, $full) !== substr($subnet_bin, 0, $full)) {
+            return false;
+        }
+        if (0 === $remainder) {
+            return true;
+        }
+        $mask = chr((0xff << (8 - $remainder)) & 0xff);
+        return ($ip_bin[$full] & $mask) === ($subnet_bin[$full] & $mask);
     }
 
     /**
@@ -411,8 +630,30 @@ class INVATRBL_Plugin
                 <button id="invatrbl-whitelist-my-ip" class="button">Whitelist My IP</button>
             </p>
             <div id="invatrbl-test-result" style="margin-top:10px;"></div>
+            <p class="description">
+                <?php
+                printf(
+                    /* translators: %s: link to IVTB, the enterprise version of the plugin. */
+                    esc_html__('Need the same kind of protection on a site that isn\'t built on WordPress? %s', 'invalid-traffic-blocker'),
+                    '<a href="' . esc_url(self::ENTERPRISE_URL) . '" target="_blank" rel="noopener noreferrer">'
+                        . esc_html__('See IVTB, the enterprise version of Invalid Traffic Blocker.', 'invalid-traffic-blocker')
+                        . '</a>'
+                );
+                ?>
+            </p>
         </div>
 <?php
+    }
+
+    /**
+     * Look up an IP address with the IPHub API.
+     */
+    private function invatrbl_api_request($ip, $api_key)
+    {
+        return wp_remote_get(self::API_URL . $ip, array(
+            'headers' => array('X-Key' => $api_key),
+            'timeout' => 5,
+        ));
     }
 
     /**
@@ -438,11 +679,14 @@ class INVATRBL_Plugin
 
         $api_key = $options['api_key'];
         $test_ip = $this->invatrbl_get_user_ip();
+        if ('' === $test_ip) {
+            echo '<div style="border: 1px solid red; padding:10px; background-color:#f2dede; color:#a94442;">'
+                . esc_html__('Error: Could not determine a valid IP address for your connection.', 'invalid-traffic-blocker')
+                . '</div>';
+            wp_die();
+        }
 
-        $response = wp_remote_get("http://v2.api.iphub.info/ip/" . $test_ip, array(
-            'headers' => array('X-Key' => $api_key),
-            'timeout' => 5,
-        ));
+        $response = $this->invatrbl_api_request($test_ip, $api_key);
 
         if (is_wp_error($response)) {
             $error_message = $response->get_error_message();
@@ -462,6 +706,9 @@ class INVATRBL_Plugin
             wp_die();
         }
 
+        // The API works again, so resume front-end lookups straight away.
+        delete_transient('invatrbl_api_backoff');
+
         $body = wp_remote_retrieve_body($response);
         echo '<div style="border: 1px solid green; padding:10px; background-color:#dff0d8; color:#3c763d;">'
             . esc_html__('Success: API Response: ', 'invalid-traffic-blocker')
@@ -470,54 +717,150 @@ class INVATRBL_Plugin
         wp_die();
     }
 
+    /**
+     * Requests that are never checked: admin screens, WP-Cron and WP-CLI (server-to-server
+     * traffic from datacenter IPs), and the login screen so admins on a VPN can still sign in.
+     * Uses constants and $pagenow instead of wp_doing_cron()/is_login() to keep WordPress 4.5 support.
+     */
+    private function invatrbl_should_skip_request()
+    {
+        global $pagenow;
+
+        if (is_admin()) {
+            return true;
+        }
+        if (defined('DOING_CRON') && DOING_CRON) {
+            return true;
+        }
+        if (defined('WP_CLI') && WP_CLI) {
+            return true;
+        }
+        return 'wp-login.php' === $pagenow;
+    }
+
+    /**
+     * IPHub block values that lead to a block in the chosen mode.
+     */
+    private function invatrbl_get_block_types($options)
+    {
+        $mode = self::invatrbl_get_blocking_mode($options);
+        if ('strict' === $mode) {
+            return array(1, 2);
+        }
+        if ('custom' === $mode) {
+            return isset($options['custom_block_options']) ? array_map('absint', (array)$options['custom_block_options']) : array();
+        }
+        return array(1);
+    }
+
+    /**
+     * Whether the visitor is a crawler that should skip the IP check.
+     *
+     * Built-in crawlers must pass a reverse DNS check, because anyone can send a
+     * crawler User-Agent. The admin's additional patterns are plain-text matches.
+     */
+    private function invatrbl_is_allowed_crawler($ip, $options)
+    {
+        $ua = isset($_SERVER['HTTP_USER_AGENT']) ? sanitize_text_field(wp_unslash($_SERVER['HTTP_USER_AGENT'])) : '';
+        if ('' === $ua) {
+            return false;
+        }
+
+        if (! empty($options['additional_crawlers'])) {
+            foreach (explode("\n", $options['additional_crawlers']) as $pattern) {
+                $pattern = trim($pattern);
+                if ('' !== $pattern && false !== stripos($ua, $pattern)) {
+                    return true;
+                }
+            }
+        }
+
+        foreach (self::$verified_crawlers as $token => $suffixes) {
+            if (false !== stripos($ua, $token)) {
+                return $this->invatrbl_verify_crawler_ip($ip, $suffixes);
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Confirm a crawler IP: its reverse DNS name must end in one of the crawler's
+     * domains and resolve back to the same IP. The result is cached for a day.
+     */
+    private function invatrbl_verify_crawler_ip($ip, $suffixes)
+    {
+        $transient_key = 'invatrbl_crawler_' . md5($ip);
+        $cached = get_transient($transient_key);
+        if (false !== $cached) {
+            return 'yes' === $cached;
+        }
+
+        $verified = false;
+        $host = function_exists('gethostbyaddr') ? gethostbyaddr($ip) : false;
+        if ($host && $host !== $ip) {
+            $host = strtolower($host);
+            foreach ($suffixes as $suffix) {
+                if (substr($host, -strlen($suffix)) === $suffix) {
+                    $verified = in_array(inet_pton($ip), $this->invatrbl_resolve_host($host, $ip), true);
+                    break;
+                }
+            }
+        }
+
+        set_transient($transient_key, $verified ? 'yes' : 'no', DAY_IN_SECONDS);
+        return $verified;
+    }
+
+    /**
+     * Forward-resolve a hostname to packed addresses of the same family as $ip.
+     */
+    private function invatrbl_resolve_host($host, $ip)
+    {
+        $addresses = array();
+        if (false === strpos($ip, ':')) {
+            $ipv4 = gethostbynamel($host);
+            foreach (is_array($ipv4) ? $ipv4 : array() as $address) {
+                $addresses[] = inet_pton($address);
+            }
+        } elseif (function_exists('dns_get_record')) {
+            $records = dns_get_record($host, DNS_AAAA);
+            foreach (is_array($records) ? $records : array() as $record) {
+                if (! empty($record['ipv6'])) {
+                    $addresses[] = inet_pton($record['ipv6']);
+                }
+            }
+        }
+        return $addresses;
+    }
+
 
     /**
      * Check visitor's IP against the IPHub API and block if necessary.
      */
     public function invatrbl_check_visitor_ip()
     {
-        // Do not run check in the admin area.
-        if (is_admin()) {
+        // Do not run check in the admin area, cron, WP-CLI or on the login screen.
+        if ($this->invatrbl_should_skip_request()) {
             return;
-        }
-
-        // 1) Optionally skip known crawlers:
-        $options = get_option($this->option_name);
-        if (! empty($options['allow_crawlers'])) {
-
-            // Default known crawler patterns:
-            $patterns = array(
-                'Googlebot',
-                'bingbot',
-                'Slurp',
-                'DuckDuckBot',
-                'Baiduspider',
-                'YandexBot',
-            );
-
-            // Merge admin’s additional patterns:
-            if (! empty($options['additional_crawlers'])) {
-                $extra = explode("\n", $options['additional_crawlers']);
-                $patterns = array_merge($patterns, $extra);
-            }
-
-            // Sanitize the User-Agent before using in preg_match()
-            $ua_raw = filter_input(INPUT_SERVER, 'HTTP_USER_AGENT', FILTER_UNSAFE_RAW);
-            $ua     = sanitize_text_field($ua_raw ?: '');
-
-            foreach ($patterns as $pat) {
-                if (preg_match('/' . trim($pat) . '/i', $ua)) {
-                    return;  // Allow this crawler
-                }
-            }
         }
 
         $options = get_option($this->option_name);
         if (empty($options['enabled']) || empty($options['api_key'])) {
             return;
         }
+
+        // Custom mode with no block types ticked blocks nothing, so skip the lookup.
+        $block_types = $this->invatrbl_get_block_types($options);
+        if (empty($block_types)) {
+            return;
+        }
+
+        // IPHub can't classify private or reserved addresses; '' means no valid IP was found.
         $api_key = $options['api_key'];
         $visitor_ip = $this->invatrbl_get_user_ip();
+        if ('' === $visitor_ip || ! $this->invatrbl_is_public_ip($visitor_ip)) {
+            return;
+        }
 
         // Check whitelist.
         if (! empty($options['whitelisted_ips'])) {
@@ -525,6 +868,11 @@ class INVATRBL_Plugin
             if (in_array($visitor_ip, $whitelist)) {
                 return;
             }
+        }
+
+        // Optionally skip verified crawlers and the admin's extra patterns.
+        if (! empty($options['allow_crawlers']) && $this->invatrbl_is_allowed_crawler($visitor_ip, $options)) {
+            return;
         }
 
         // Determine cache duration.
@@ -536,40 +884,26 @@ class INVATRBL_Plugin
         $ip_data = get_transient($transient_key);
 
         if (false === $ip_data) {
-            $response = wp_remote_get("http://v2.api.iphub.info/ip/" . $visitor_ip, array(
-                'headers' => array('X-Key' => $api_key),
-                'timeout' => 5,
-            ));
-
-            if (is_wp_error($response)) {
-                return; // Allow access if API connection fails.
-            }
-
-            $code = wp_remote_retrieve_response_code($response);
-            if ($code !== 200) {
+            // The API failed recently: allow access rather than make every visitor wait on it.
+            if (get_transient('invatrbl_api_backoff')) {
                 return;
             }
 
-            $body = wp_remote_retrieve_body($response);
-            $ip_data = json_decode($body, true);
+            $response = $this->invatrbl_api_request($visitor_ip, $api_key);
+            $ip_data = null;
+            if (! is_wp_error($response) && 200 === wp_remote_retrieve_response_code($response)) {
+                $ip_data = json_decode(wp_remote_retrieve_body($response), true);
+            }
+
+            if (! is_array($ip_data)) {
+                // Allow access if the API fails, and pause lookups for a few minutes.
+                set_transient('invatrbl_api_backoff', 1, self::API_BACKOFF_SECONDS);
+                return;
+            }
             set_transient($transient_key, $ip_data, $cache_duration);
         }
 
-        $block_ip = false;
-        if (! empty($options['safe_mode'])) {
-            if (isset($ip_data['block']) && (int)$ip_data['block'] === 1) {
-                $block_ip = true;
-            }
-        } elseif (! empty($options['strict_mode'])) {
-            if (isset($ip_data['block']) && in_array((int)$ip_data['block'], array(1, 2))) {
-                $block_ip = true;
-            }
-        } elseif (! empty($options['custom_mode'])) {
-            $custom_options = isset($options['custom_block_options']) ? (array)$options['custom_block_options'] : array();
-            if (isset($ip_data['block']) && in_array((int)$ip_data['block'], $custom_options)) {
-                $block_ip = true;
-            }
-        }
+        $block_ip = isset($ip_data['block']) && in_array((int)$ip_data['block'], $block_types, true);
 
         if ($block_ip) {
             // Force output as HTML.
