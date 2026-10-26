@@ -3,7 +3,7 @@ Contributors: maocular
 Tags: invalid traffic, blocker, ip, adsense, vpn
 Requires at least: 4.5
 Tested up to: 7.1
-Stable tag: 1.5.0
+Stable tag: 1.5.1
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 Requires PHP: 7.2
@@ -46,6 +46,9 @@ Leave it on "Automatic" if you use Cloudflare, or a proxy on your own server or 
 No. With "Allow Known Crawlers" enabled, Googlebot, Bingbot, Yahoo Slurp, Baiduspider and YandexBot are confirmed with a reverse DNS lookup. A visitor who only fakes the User-Agent is checked like everyone else. Patterns you add under "Additional Crawler Patterns" are not verified, so only add crawlers you need.
 
 == Changelog ==
+= 1.5.1 =
+* Fix: The settings page no longer warns that proxy headers are ignored when your server already passes the real visitor IP to WordPress (for example behind Cloudflare). The warning now only appears when the headers point to a different IP than the one the plugin uses.
+
 = 1.5.0 =
 * Refreshed the settings page with responsive sections, saved configuration status, a masked API key, inline whitelist feedback, and API test loading/error states. Assets are local and load only on the plugin settings page.
 * Added clear IPHub data-sharing guidance beside setup. Existing option names and visitor blocking behavior are preserved.
@@ -90,6 +93,9 @@ No. With "Allow Known Crawlers" enabled, Googlebot, Bingbot, Yahoo Slurp, Baidus
 
 
 == Upgrade Notice ==
+= 1.5.1 =
+Fixes a false "proxy headers ignored" warning on the settings page. Updating from 1.3 or earlier? This release also stops visitors faking their IP to get past the blocker; if your site is behind a proxy or CDN other than Cloudflare, check the Visitor IP Source setting.
+
 = 1.5.0 =
 Security update and redesigned settings page. Stops visitors faking their IP or a crawler User-Agent to get past the blocker, and switches API calls to HTTPS. If your site is behind a proxy or CDN other than Cloudflare, check the Visitor IP Source setting after updating.
 

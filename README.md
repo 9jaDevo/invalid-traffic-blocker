@@ -4,7 +4,7 @@
 **Tags:** invalid traffic, blocker, ip, adsense, vpn  
 **Requires at least:** 4.5  
 **Tested up to:** 7.1  
-**Stable tag:** 1.4  
+**Stable tag:** 1.5.1  
 **License:** GPLv2 or later  
 **License URI:** [https://www.gnu.org/licenses/gpl-2.0.html](https://www.gnu.org/licenses/gpl-2.0.html)  
 **Requires PHP:** 7.2  
@@ -60,6 +60,15 @@ No. With "Allow Known Crawlers" enabled, Googlebot, Bingbot, Yahoo Slurp, Baidus
 
 ## Changelog
 
+### 1.5.1
+
+- Fix: The settings page no longer warns that proxy headers are ignored when your server already passes the real visitor IP to WordPress (for example behind Cloudflare). The warning now only appears when the headers point to a different IP than the one the plugin uses.
+
+### 1.5.0
+
+- Refreshed the settings page with responsive sections, saved configuration status, a masked API key, inline whitelist feedback, and API test loading/error states. Assets are local and load only on the plugin settings page.
+- Added clear IPHub data-sharing guidance beside setup. Existing option names and visitor blocking behavior are preserved.
+
 ### 1.4
 
 - Security: The visitor IP is now read from the direct connection. Proxy headers (X-Forwarded-For, CF-Connecting-IP) are only trusted when the request comes from Cloudflare or a private network address, or when you choose them in the new "Visitor IP Source" setting. Previously any visitor could fake their IP to skip the check or use up your API quota.
@@ -104,6 +113,14 @@ No. With "Allow Known Crawlers" enabled, Googlebot, Bingbot, Yahoo Slurp, Baidus
 
 ## Upgrade Notice
 
+### 1.5.1
+
+Fixes a false "proxy headers ignored" warning on the settings page. Updating from 1.3 or earlier? This release also stops visitors faking their IP to get past the blocker; if your site is behind a proxy or CDN other than Cloudflare, check the Visitor IP Source setting.
+
+### 1.5.0
+
+Security update and redesigned settings page. Stops visitors faking their IP or a crawler User-Agent to get past the blocker, and switches API calls to HTTPS. If your site is behind a proxy or CDN other than Cloudflare, check the Visitor IP Source setting after updating.
+
 ### 1.4
 
 Security update: stops visitors faking their IP or a crawler User-Agent to get past the blocker, and switches API calls to HTTPS. If your site is behind a proxy or CDN other than Cloudflare, check the new Visitor IP Source setting after updating.
@@ -135,8 +152,3 @@ Terms and Privacy:
   • IPHub.info Privacy Policy: [https://iphub.info/legal/privacy](https://iphub.info/legal/privacy)
 
 When "Allow Known Crawlers" is enabled, a visitor whose User-Agent claims to be a known search engine crawler is verified with a reverse and forward DNS lookup through your server's own DNS resolver. Nothing is sent to IPHub.info or any other service for this check.
-
-## Admin experience update (1.5.0)
-
-* Refreshed the settings page with responsive sections, saved configuration status, a masked API key, inline whitelist feedback, and API test loading/error states. Assets are local and load only on the plugin settings page.
-* Added clear IPHub data-sharing guidance beside setup. Existing option names and visitor blocking behavior are preserved.
