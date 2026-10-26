@@ -1,0 +1,107 @@
+name: 'Deploy to WordPress.org'
+
+# Pushing to the release branch publishes to WordPress.org:
+# - a new Version (plugin header) with a matching Stable tag (readme.txt) is released
+#   to trunk and tags/<version>, together with the images in .wordpress-org;
+# - with the version unchanged, only readme.txt and the .wordpress-org images are updated.
+# Running this workflow by hand (Actions tab > Run workflow) is always a dry run:
+# it prepares the SVN commit and lists what would change, but uploads nothing.
+on:
+  push:
+    branches:
+      - release
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: wordpress-org-deploy
+  cancel-in-progress: false
+
+env:
+  SLUG: invalid-traffic-blocker
+
+jobs:
+  plugin-check:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v7
+
+    - name: Exclude hidden files and folders that aren't shipped
+      run: |
+        find . -type f -name ".*" -exec rm -f {} \;
+        rm -rf .github .wordpress-org
+
+    - name: Run plugin check
+      uses: wordpress/plugin-check-action@v1
+
+  deploy:
+    needs: plugin-check
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v7
+
+    - name: Check that Version and Stable tag match
+      id: version
+      run: |
+        version=$(grep -m1 -E '^[[:space:]]*\*[[:space:]]*Version:' "$SLUG.php" | sed -E 's/.*Version:[[:space:]]*//' | tr -d '\r[:space:]')
+        stable=$(grep -m1 -E '^Stable tag:' readme.txt | sed -E 's/^Stable tag:[[:space:]]*//' | tr -d '\r[:space:]')
+        echo "Version in $SLUG.php: $version"
+        echo "Stable tag in readme.txt: $stable"
+        if [ -z "$version" ] || [ "$version" != "$stable" ]; then
+          echo "::error::Version in $SLUG.php ($version) and Stable tag in readme.txt ($stable) must match."
+          exit 1
+        fi
+        echo "version=$version" >> "$GITHUB_OUTPUT"
+
+    # The deploy action silently skips a version that is already published,
+    # so fail loudly if the code changed without a new version number.
+    - name: Stop if code changed but the version is already published
+      env:
+        VERSION: ${{ steps.version.outputs.version }}
+      run: |
+        tag_url="https://plugins.svn.wordpress.org/$SLUG/tags/$VERSION/"
+        if ! curl -sfI "$tag_url" > /dev/null; then
+          echo "Version $VERSION isn't published yet, so it will be released."
+          exit 0
+        fi
+        command -v svn > /dev/null || { sudo apt-get update -y && sudo apt-get install -y subversion; }
+        svn export -q "$tag_url" "$RUNNER_TEMP/published"
+        rsync -r --exclude-from=.distignore ./ "$RUNNER_TEMP/release/"
+        changed=$(diff -rq --strip-trailing-cr "$RUNNER_TEMP/release" "$RUNNER_TEMP/published" | grep -E '\.(php|js|css)( |$)' || true)
+        if [ -n "$changed" ]; then
+          echo "$changed"
+          echo "::error::The code differs from the published version $VERSION. Raise Version in $SLUG.php and Stable tag in readme.txt to release it."
+          exit 1
+        fi
+        echo "Version $VERSION is already published with the same code, so only readme.txt and images will be updated."
+
+    - name: Deploy to WordPress.org
+      uses: 10up/action-wordpress-plugin-deploy@2.3.0
+      with:
+        dry-run: ${{ github.event_name == 'workflow_dispatch' }}
+      env:
+        # A dry run never commits, so it gets placeholder credentials instead of the real secrets.
+        SVN_USERNAME: ${{ github.event_name == 'workflow_dispatch' && 'dry-run' || secrets.SVN_USERNAME }}
+        SVN_PASSWORD: ${{ github.event_name == 'workflow_dispatch' && 'dry-run' || secrets.SVN_PASSWORD }}
+        # A dry run uses an unpublished version number, so the action goes through every step
+        # instead of stopping at "already published".
+        VERSION: ${{ github.event_name == 'workflow_dispatch' && format('{0}-dryrun', steps.version.outputs.version) || steps.version.outputs.version }}
+
+  readme-and-assets:
+    needs: deploy
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v7
+
+    - name: Update readme.txt and images on WordPress.org
+      uses: 10up/action-wordpress-plugin-asset-update@2.2.0
+      env:
+        SVN_USERNAME: ${{ secrets.SVN_USERNAME }}
+        SVN_PASSWORD: ${{ secrets.SVN_PASSWORD }}
+        IGNORE_OTHER_FILES: true

@@ -1,0 +1,8 @@
+# Kept out of the WordPress.org release by .github/workflows/deploy.yml.
+.distignore
+.git
+.github
+.gitattributes
+.gitignore
+.wordpress-org
+README.md
